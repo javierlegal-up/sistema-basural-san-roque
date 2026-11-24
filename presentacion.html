@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mapa Limpio · Cómo funciona</title>
+<style>
+  @page { size: A4; margin: 14mm 14mm 16mm; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; font-family: "Segoe UI", Inter, Arial, sans-serif; color: #1e293b; background: #e2e8f0; line-height: 1.5; font-size: 14px; }
+  .page { width: 210mm; min-height: 297mm; margin: 16px auto; background: #fff; padding: 16mm 16mm 18mm; box-shadow: 0 4px 24px rgba(0,0,0,.12); position: relative; }
+  h1 { font-size: 30px; margin: 0; line-height: 1.15; color: #064e3b; }
+  h2 { font-size: 19px; margin: 26px 0 10px; color: #064e3b; border-bottom: 2px solid #d1fae5; padding-bottom: 4px; }
+  h3 { font-size: 15px; margin: 0 0 4px; }
+  p { margin: 0 0 8px; }
+  ul { margin: 4px 0 8px; padding-left: 18px; } li { margin-bottom: 3px; }
+  .muted { color: #64748b; }
+  .small { font-size: 12px; }
+  .cover { background: linear-gradient(135deg, #065f46, #064e3b); color: #fff; border-radius: 14px; padding: 22px 24px; margin-bottom: 18px; }
+  .cover h1 { color: #fff; }
+  .cover .kicker { text-transform: uppercase; letter-spacing: .12em; font-size: 11px; color: #a7f3d0; margin-bottom: 6px; }
+  .cover p { color: #d1fae5; font-size: 15px; margin: 10px 0 0; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 14px; break-inside: avoid; }
+  .card.red { border-color: #fecaca; background: #fef2f2; } .card.blue { border-color: #bfdbfe; background: #eff6ff; } .card.green { border-color: #bbf7d0; background: #f0fdf4; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; padding: 2px 8px; border-radius: 4px; margin-bottom: 6px; }
+  .tag.red { background: #dc2626; color: #fff; } .tag.blue { background: #1d4ed8; color: #fff; } .tag.green { background: #15803d; color: #fff; }
+  .flow { display: flex; align-items: stretch; gap: 6px; margin: 8px 0 4px; }
+  .step { flex: 1; text-align: center; border-radius: 10px; padding: 10px 6px; font-size: 12px; break-inside: avoid; }
+  .step b { display: block; font-size: 13px; margin-bottom: 2px; }
+  .step .n { width: 24px; height: 24px; border-radius: 50%; margin: 0 auto 6px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; }
+  .arrow { align-self: center; color: #94a3b8; font-size: 18px; }
+  .s1 { background: #fef2f2; } .s1 .n { background: #dc2626; }
+  .s2 { background: #fffbeb; } .s2 .n { background: #d97706; }
+  .s3 { background: #eff6ff; } .s3 .n { background: #1d4ed8; }
+  .s4 { background: #f0fdf4; } .s4 .n { background: #15803d; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  th { background: #f1f5f9; font-size: 12px; color: #475569; }
+  .callout { border-left: 4px solid #047857; background: #ecfdf5; padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 10px 0; }
+  .link { font-family: Consolas, monospace; font-size: 13px; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+  .footer { position: absolute; bottom: 8mm; left: 16mm; right: 16mm; font-size: 10px; color: #94a3b8; display: flex; justify-content: space-between; }
+  .toolbar { position: sticky; top: 0; z-index: 10; background: #0f172a; color: #fff; padding: 10px 16px; display: flex; gap: 12px; align-items: center; justify-content: center; font-size: 14px; }
+  .toolbar button { background: #10b981; color: #052e16; border: 0; border-radius: 8px; padding: 8px 16px; font-weight: 700; font-size: 14px; cursor: pointer; }
+  @media print {
+    body { background: #fff; }
+    .toolbar { display: none; }
+    .page { margin: 0; box-shadow: none; width: auto; min-height: auto; padding: 0; page-break-after: always; }
+    .page:last-child { page-break-after: auto; }
+    .footer { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">Para mandarlo: <button onclick="window.print()">Guardar como PDF</button> <span class="muted small" style="color:#94a3b8">En la ventana de impresión elegí "Guardar como PDF"</span></div>
+
+<!-- ============ PÁGINA 1 ============ -->
+<section class="page">
+  <div class="cover">
+    <div class="kicker">Propuesta para la Municipalidad de San Roque · Corrientes</div>
+    <h1>Mapa Limpio</h1>
+    <p>Un sistema simple para que los vecinos reclamen la limpieza de basurales con una foto, y el área de limpieza sepa cada día qué tiene que retirar, dónde y en qué orden, sin salir a recorrer el pueblo.</p>
+  </div>
+
+  <h2>El problema</h2>
+  <ul>
+    <li>Hoy el vecino tiene que <b>ir a la Municipalidad o llamar</b> para pedir que limpien una esquina, un baldío o una zanja.</li>
+    <li>El reclamo queda en un papel o en un mensaje suelto: <b>no hay foto, ni ubicación exacta, ni seguimiento</b>.</li>
+    <li>El área de limpieza tiene que <b>salir a recorrer</b> para ver dónde hay basura y cuánta, y el camión da vueltas de más.</li>
+    <li>Los microbasurales crecen, juntan agua y se vuelven <b>criaderos del mosquito del dengue</b>, ratas y focos de quema.</li>
+  </ul>
+
+  <h2>La solución en una frase</h2>
+  <div class="callout">El vecino manda una foto desde el celular → el encargado de limpieza la ve en un panel, ordenada por prioridad → arma el recorrido del día → la cuadrilla lo marca como hecho con foto → el vecino ve que se resolvió.</div>
+
+  <div class="flow">
+    <div class="step s1"><div class="n">1</div><b>Recibido</b>El vecino reclama con foto y ubicación</div>
+    <div class="arrow">›</div>
+    <div class="step s2"><div class="n">2</div><b>Programado</b>El encargado lo suma al recorrido</div>
+    <div class="arrow">›</div>
+    <div class="step s3"><div class="n">3</div><b>En camino</b>La cuadrilla sigue la ruta del día</div>
+    <div class="arrow">›</div>
+    <div class="step s4"><div class="n">4</div><b>Resuelto</b>Foto del después y aviso al vecino</div>
+  </div>
+
+  <h2>Quién usa qué</h2>
+  <div class="grid3">
+    <div class="card red"><span class="tag red">Vecino</span><h3>Reclama en 1 minuto</h3>
+      <ul class="small"><li>Entra desde un link de WhatsApp o un QR. <b>No hay que descargar nada.</b></li><li>Saca una foto; la ubicación se marca sola con el GPS.</li><li>Elige qué hay (bolsas, poda, escombros, voluminosos) y el tamaño.</li><li>Recibe un <b>número de reclamo</b> y ve en qué estado está.</li></ul></div>
+    <div class="card blue"><span class="tag blue">Encargado municipal</span><h3>Planifica sin recorrer</h3>
+      <ul class="small"><li>Ve todos los reclamos en una <b>bandeja ordenada por prioridad</b>.</li><li>Elige los de hoy y el sistema arma el <b>recorrido en orden</b>.</li><li>Ve km, tiempo y m³ estimados del día.</li><li>Lo manda a la cuadrilla con un toque.</li></ul></div>
+    <div class="card green"><span class="tag green">Cuadrilla / chofer</span><h3>Sigue la ruta del día</h3>
+      <ul class="small"><li>En su celular ve <b>"Hoy te toca"</b>, parada por parada.</li><li>Botón <b>"Cómo llegar"</b> que abre Google Maps.</li><li>Al terminar, saca la <b>foto del después</b> y lo marca hecho.</li><li>El punto pasa a verde en el mapa.</li></ul></div>
+  </div>
+
+  <div class="footer"><span>Mapa Limpio · San Roque, Corrientes</span><span>Página 1 de 2</span></div>
+</section>
+
+<!-- ============ PÁGINA 2 ============ -->
+<section class="page">
+  <h2 style="margin-top:0">Cómo decide qué va primero</h2>
+  <p>Cada reclamo recibe un puntaje de prioridad de 0 a 100, para que el encargado vea de un vistazo qué atender antes. Siempre puede cambiar el orden a mano.</p>
+  <table>
+    <tr><th style="width:38%">Criterio</th><th style="width:16%">Puntos</th><th>Por qué</th></tr>
+    <tr><td><b>Riesgo de dengue</b> (cubiertas, baldes, agua acumulada)</td><td>+40</td><td>Prevención sanitaria: es lo más urgente.</td></tr>
+    <tr><td><b>Tamaño</b> (chico / mediano / grande)</td><td>hasta +25</td><td>Los grandes necesitan camión y crecen más rápido.</td></tr>
+    <tr><td><b>Días de espera</b></td><td>+2 por día, hasta +30</td><td>Que ningún reclamo quede olvidado.</td></tr>
+    <tr><td><b>Vecinos que lo piden</b></td><td>hasta +15</td><td>Si muchos lo reclaman, afecta a más gente.</td></tr>
+  </table>
+
+  <h2>Lo que gana la Municipalidad</h2>
+  <div class="grid2">
+    <div class="card"><h3>Menos recorrido, menos combustible</h3><p class="small">El camión sale con la ruta ordenada: siempre va al punto más cercano y vuelve. No hace falta salir a "ver" dónde hay basura.</p></div>
+    <div class="card"><h3>Evidencia con foto</h3><p class="small">Cada reclamo tiene la foto del antes y la del después. Sirve para mostrar el trabajo hecho y responder consultas.</p></div>
+    <div class="card"><h3>Datos para decidir</h3><p class="small">Resumen con reclamos por semana, tiempo de respuesta, m³ retirados y zonas donde se repite. Ayuda a decidir dónde poner contenedores o carteles.</p></div>
+    <div class="card"><h3>Vecinos que ven respuesta</h3><p class="small">El vecino sigue su reclamo con número y ve cuando se resuelve. Mejora la confianza y reduce llamados y visitas a la oficina.</p></div>
+  </div>
+
+  <h2>Cómo probar la demo</h2>
+  <ol class="small" style="padding-left:18px">
+    <li>Abrir <span class="link">javierlegal-up.github.io/sistema-basural-san-roque</span> en el celular o la computadora.</li>
+    <li><b>Como vecino:</b> tocar "Reportar un basural", mover el mapa hasta el lugar, elegir tipo y tamaño, y enviar. Aparece el número de reclamo.</li>
+    <li><b>Como Municipalidad:</b> tocar el ícono del edificio (arriba, al lado del buscador) → "Entrar como encargado (demo)".</li>
+    <li>En la <b>Bandeja</b>, tocar <b>"+ Hoy"</b> en los reclamos que se quieran retirar.</li>
+    <li>En <b>Recorrido de hoy</b>, tocar "Ver recorrido en el mapa" o "Abrir en Google Maps".</li>
+    <li>En <b>Cuadrilla</b>, tocar "Hecho + foto" en una parada: el punto pasa a verde en el mapa.</li>
+  </ol>
+  <p class="small muted">La demo usa puntos de ejemplo y guarda los datos solo en el navegador de quien la usa. Sirve para mostrar cómo funciona.</p>
+
+  <h2>Qué hace falta para usarlo en serio</h2>
+  <table>
+    <tr><th style="width:30%">Etapa</th><th>Qué incluye</th><th style="width:18%">Plazo estimado</th></tr>
+    <tr><td><b>1. Acuerdo</b></td><td>Definir quién recibe los reclamos, días de retiro y cuántas cuadrillas o camiones hay.</td><td>1–2 semanas</td></tr>
+    <tr><td><b>2. Versión real</b></td><td>Servidor compartido (los reclamos le llegan al empleado), usuarios para empleados municipales, fotos guardadas y avisos al vecino.</td><td>3–5 semanas</td></tr>
+    <tr><td><b>3. Piloto</b></td><td>Lanzarlo en 1 o 2 barrios con carteles QR, radio y grupos de WhatsApp. Medir y ajustar.</td><td>6–8 semanas</td></tr>
+  </table>
+  <p class="small" style="margin-top:8px"><b>Costo de tecnología:</b> en la escala de un piloto casi todo entra en planes gratuitos (servidor, alojamiento web y mapas). El costo principal es el tiempo de las personas y el compromiso de retirar lo que se reclama.</p>
+
+  <div class="callout small"><b>Privacidad:</b> no se publican datos personales de los vecinos. Se piden solo los datos necesarios (Ley 25.326) y los reclamos son información ciudadana, no denuncias contra personas.</div>
+
+  <div class="footer"><span>Mapa Limpio · San Roque, Corrientes</span><span>Página 2 de 2</span></div>
+</section>
+
+</body>
+</html>

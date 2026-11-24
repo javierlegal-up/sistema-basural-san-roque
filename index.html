@@ -11,6 +11,8 @@
 <script>tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] } } } };</script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Rotación del mapa (dos dedos en el celular, Shift + rueda en la compu) -->
+<script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate.js"></script>
 <style>
   html, body { height: 100%; overflow: hidden; }
   .pin { width: 22px; height: 22px; border-radius: 9999px; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
@@ -18,6 +20,8 @@
   .pin-red { background: #dc2626; } .pin-yellow { background: #d97706; } .pin-green { background: #16a34a; }
   .me-dot { width: 18px; height: 18px; border-radius: 9999px; background: #2563eb; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(37,99,235,.25); }
   .leaflet-top.leaflet-right { top: 64px; }
+  .route-num { width: 26px; height: 26px; border-radius: 9999px; background: #1d4ed8; color: #fff; font: 700 13px Inter, sans-serif; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+  .route-num.depot { background: #0f172a; width: 30px; height: 30px; }
   .scroll-thin::-webkit-scrollbar { width: 6px; } .scroll-thin::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius: 3px; }
   .fade-in { animation: fade .2s ease-out; } @keyframes fade { from { opacity:0; transform: translateY(8px);} to {opacity:1; transform:none;} }
   .ico { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; flex-shrink: 0; }
@@ -31,6 +35,13 @@
     #summaryModal { position: static !important; display: block !important; overflow: visible !important; background: #fff !important; }
     .no-print { display: none !important; }
     .avoid-break { break-inside: avoid; }
+    @page { size: A4; margin: 12mm; }
+    #summaryContent { max-width: none !important; padding: 0 !important; font-size: 12px; }
+    .print-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+    .print-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+    #chartTip { display: none !important; }
+    table { break-inside: auto; } tr { break-inside: avoid; }
+    section, .rounded-xl { box-shadow: none !important; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 </style>
@@ -52,6 +63,7 @@
   <div class="px-8 pb-10 space-y-3 max-w-sm w-full mx-auto">
     <button id="enterBtn" class="w-full bg-white text-emerald-900 font-semibold rounded-lg py-3.5 text-lg active:scale-[.98] transition">Entrar</button>
     <button id="welcomeInfo" class="w-full text-emerald-100 text-sm py-2">¿Qué es Mapa Limpio?</button>
+    <button id="welcomeAdmin" class="w-full text-emerald-200/80 text-xs py-1 underline">Soy de la Municipalidad</button>
     <p id="demoNote" class="text-[11px] text-emerald-300/70 text-center">Versión de prueba. Los puntos del mapa son ejemplos.</p>
   </div>
 </div>
@@ -82,15 +94,30 @@
           </div>
           <div id="searchResults" class="hidden absolute left-0 right-0 mt-1 bg-white rounded-lg shadow-lg ring-1 ring-slate-200 overflow-hidden max-h-72 overflow-y-auto"></div>
         </div>
+        <button id="adminBtn" class="bg-white rounded-lg shadow-md ring-1 ring-slate-200 w-12 flex items-center justify-center text-blue-700" data-icon="building" data-cls="w-5 h-5" title="Municipalidad: panel de limpieza"></button>
         <button id="summaryBtn" class="bg-white rounded-lg shadow-md ring-1 ring-slate-200 w-12 flex items-center justify-center text-slate-600" data-icon="chart" data-cls="w-5 h-5" title="Resumen y estadísticas"></button>
         <button id="infoBtn"class="bg-white rounded-lg shadow-md ring-1 ring-slate-200 w-12 flex items-center justify-center text-slate-600" data-icon="info" data-cls="w-5 h-5" title="Sobre el proyecto"></button>
       </div>
+    </div>
+
+    <!-- Aviso de recorrido municipal dibujado en el mapa -->
+    <div id="routeChip" class="hidden absolute top-[68px] left-3 z-[600] flex items-center gap-2 bg-blue-700 text-white text-sm rounded-lg shadow-md pl-3 pr-1 py-1">
+      <span data-icon="truck" data-cls="w-4 h-4"></span><span id="routeChipText">Recorrido de hoy</span>
+      <button id="routeBack" class="rounded-md bg-white/15 px-2 py-1 text-xs font-medium">Volver al panel</button>
+      <button id="routeClear" class="rounded-md p-1 hover:bg-white/15" data-icon="x" data-cls="w-4 h-4" title="Quitar recorrido"></button>
     </div>
 
     <!-- Botones del mapa -->
     <div class="absolute right-[10px] top-[150px] z-[500] flex flex-col gap-2">
       <button id="locateBtn" title="Mi ubicación" class="w-[34px] h-[34px] bg-white rounded shadow ring-1 ring-black/10 flex items-center justify-center text-slate-700" data-icon="locate" data-cls="w-5 h-5"></button>
       <button id="layerBtn" title="Satélite / Calles" class="w-[34px] h-[34px] bg-white rounded shadow ring-1 ring-black/10 flex items-center justify-center text-slate-700" data-icon="layers" data-cls="w-5 h-5"></button>
+      <div id="rotateBtns" class="hidden flex-col gap-2 mt-2">
+        <button id="northBtn" title="Volver al norte" class="w-[34px] h-[34px] bg-white rounded shadow ring-1 ring-black/10 flex items-center justify-center">
+          <svg id="needle" width="20" height="20" viewBox="0 0 24 24" style="transition: transform .2s"><path d="M12 2 7.5 12h9z" fill="#dc2626"/><path d="M12 22 7.5 12h9z" fill="#94a3b8"/></svg>
+        </button>
+        <button id="rotLeftBtn" title="Girar a la izquierda" class="w-[34px] h-[34px] bg-white rounded shadow ring-1 ring-black/10 flex items-center justify-center text-slate-700" data-icon="rotL" data-cls="w-5 h-5"></button>
+        <button id="rotRightBtn" title="Girar a la derecha" class="w-[34px] h-[34px] bg-white rounded shadow ring-1 ring-black/10 flex items-center justify-center text-slate-700" data-icon="rotR" data-cls="w-5 h-5"></button>
+      </div>
     </div>
   </div>
 
@@ -101,7 +128,14 @@
       <div class="w-8 h-8 rounded-lg bg-emerald-700 text-white flex items-center justify-center" data-icon="leaf" data-cls="w-5 h-5"></div>
       <div class="leading-tight"><div class="font-semibold">Mapa Limpio</div><div class="text-xs text-slate-500">San Roque, Corrientes</div></div>
     </div>
-    <div id="panelBody" class="overflow-y-auto scroll-thin flex-1 pb-[env(safe-area-inset-bottom)]"></div>
+    <div id="panelBody" class="overflow-y-auto scroll-thin flex-1"></div>
+    <!-- Pestañas: cada sección en su lugar, así el inicio entra sin desplazarse -->
+    <nav id="tabBar" class="shrink-0 grid grid-cols-4 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)]">
+      <button data-tabgo="home" class="tab-btn flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium"><span data-icon="home" data-cls="w-5 h-5"></span>Inicio</button>
+      <button data-tabgo="list" class="tab-btn flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium"><span data-icon="pin" data-cls="w-5 h-5"></span>Puntos</button>
+      <button data-tabgo="feed" class="tab-btn flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium"><span data-icon="bell" data-cls="w-5 h-5"></span>Novedades</button>
+      <button data-tabgo="summary" class="tab-btn flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium text-slate-500"><span data-icon="chart" data-cls="w-5 h-5"></span>Resumen</button>
+    </nav>
   </div>
 </div>
 
@@ -198,6 +232,11 @@
   <div id="summaryContent" class="max-w-5xl mx-auto px-4 sm:px-6 py-5"></div>
 </div>
 
+<!-- ===================== MUNICIPALIDAD (demo) ===================== -->
+<div id="adminModal" class="hidden fixed inset-0 z-[3300] bg-slate-100 overflow-y-auto scroll-thin">
+  <div id="adminContent" class="max-w-5xl mx-auto px-4 sm:px-6 py-5"></div>
+</div>
+
 <div id="toast"class="hidden fixed top-20 left-1/2 -translate-x-1/2 z-[4000] bg-slate-900 text-white text-sm rounded-lg px-4 py-2.5 shadow-xl max-w-[90vw] text-center"></div>
 
 <script>
@@ -222,6 +261,15 @@ const ICONS = {
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   megaphone: '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
   chart: '<path d="M3 3v18h18"/><path d="M8 17v-5M13 17V8M18 17v-8"/>',
+  building: '<path d="M3 21h18M5 21V8l7-5 7 5v13M9 10h1M14 10h1M9 14h1M14 14h1M10 21v-3h4v3"/>',
+  truck: '<path d="M10 17h4V5H2v12h3"/><path d="M14 8h4l4 4v5h-3"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="17.5" r="2.5"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  nav: '<path d="m3 11 19-9-9 19-2-8-8-2z"/>',
+  home: '<path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2h-4v-6H9v6H5a2 2 0 0 1-2-2z"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  rotL: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  rotR: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
   print: '<path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
 };
 const icon = (n, cls = 'ico') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
@@ -334,8 +382,9 @@ function showImage(src, caption) {
   d.onclick = () => d.remove(); document.body.append(d);
 }
 const fmtDate = (iso) => new Date(iso).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
-function fmtDateTime(iso) { const s = new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }); return s[0].toUpperCase() + s.slice(1) + ' h'; }
-function fmtShort(iso) { const s = new Date(iso).toLocaleString('es-AR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); return s[0].toUpperCase() + s.slice(1) + ' h'; }
+// hour12: false evita el "09:00 a. m. h" que salía en algunos navegadores
+function fmtDateTime(iso) { const s = new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hour12: false }); return s[0].toUpperCase() + s.slice(1) + ' h'; }
+function fmtShort(iso) { const s = new Date(iso).toLocaleString('es-AR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }); return s[0].toUpperCase() + s.slice(1) + ' h'; }
 function relTime(iso) { const d = Math.floor((Date.now() - new Date(iso)) / 86400000); if (d <= 0) return 'hoy'; if (d === 1) return 'ayer'; if (d < 7) return `hace ${d} días`; return `hace ${Math.floor(d / 7)} sem.`; }
 function untilText(iso) { const d = Math.round((new Date(iso).setHours(0,0,0,0) - new Date().setHours(0,0,0,0)) / 86400000); if (d === 0) return 'Hoy'; if (d === 1) return 'Mañana'; if (d < 0) return 'Ya pasó'; return `En ${d} días`; }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add('hidden'), 2600); }
@@ -348,16 +397,45 @@ function closeModal(id) {
 const isMobile = () => window.innerWidth < 1024;
 
 // ================= Mapa =================
-const map = L.map('map', { zoomControl: false, maxZoom: 20 }).setView(TOWN.center, TOWN.zoom);
+// Mapas sin clave de API. maxNativeZoom = el zoom más cercano que el proveedor tiene para San Roque;
+// más allá de eso Leaflet agranda la última imagen en vez de pedir una que no existe
+// (Esri devuelve "Map data not yet available" y CARTO ahora pide clave: "API KEY REQUIRED").
+// OJO: las teselas de openstreetmap.org sirven para la demo; en producción hay que pasar a MapTiler/Stadia (ver PLAN-PRODUCCION.md).
+const MAX_ZOOM = 19;
+const map = L.map('map', {
+  zoomControl: false, maxZoom: MAX_ZOOM,
+  // rotación (plugin leaflet-rotate): dos dedos en el celular, Shift + rueda del mouse en la compu
+  rotate: true, bearing: 0, touchRotate: true, shiftKeyRotate: true, rotateControl: false,
+}).setView(TOWN.center, TOWN.zoom);
 L.control.zoom({ position: 'topright' }).addTo(map);
+
+// ---- Rotar el mapa ----
+const canRotate = typeof map.setBearing === 'function'; // si el plugin no cargó, el mapa queda fijo al norte
+const bearing = () => canRotate ? (map.getBearing?.() || 0) : 0;
+function rotateTo(deg) { map.setBearing(((deg % 360) + 360) % 360); updateNeedle(); }
+function updateNeedle() {
+  const b = bearing();
+  $('#needle').style.transform = `rotate(${-b}deg)`; // la aguja roja siempre apunta al norte real
+  $('#northBtn').classList.toggle('ring-2', b !== 0); $('#northBtn').classList.toggle('ring-blue-500', b !== 0);
+}
+if (canRotate) {
+  $('#rotateBtns').classList.replace('hidden', 'flex');
+  $('#northBtn').onclick = () => { rotateTo(0); toast('Mapa con el norte arriba'); };
+  $('#rotLeftBtn').onclick = () => rotateTo(bearing() - 30);
+  $('#rotRightBtn').onclick = () => rotateTo(bearing() + 30);
+  map.on('rotate', updateNeedle);
+}
 const streetLayers = [
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 20, subdomains: 'abcd', attribution: '&copy; OpenStreetMap &copy; CARTO' }),
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20, maxNativeZoom: 19, attribution: 'Tiles &copy; Esri' }),
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: MAX_ZOOM, maxNativeZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }),
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: MAX_ZOOM, maxNativeZoom: 17, attribution: 'Tiles &copy; Esri' }),
 ];
+// Abriendo el archivo directo (INICIAR.bat) el navegador no manda "Referer" y OpenStreetMap puede bloquear: usamos Esri primero
+if (location.protocol === 'file:') streetLayers.reverse();
 const satLayer = L.layerGroup([
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20, maxNativeZoom: 19, attribution: 'Imágenes &copy; Esri, Maxar' }),
-  // nombres de calles encima de la foto satelital
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', { maxZoom: 20, subdomains: 'abcd' }),
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: MAX_ZOOM, maxNativeZoom: 17, attribution: 'Imágenes &copy; Esri, Maxar' }),
+  // calles y nombres encima de la foto satelital
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', { maxZoom: MAX_ZOOM, maxNativeZoom: 17 }),
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: MAX_ZOOM, maxNativeZoom: 17 }),
 ]);
 let streetIdx = 0, streetOk = false, streetErr = 0, satOn = false;
 streetLayers[0].on('tileload', () => streetOk = true);
@@ -372,7 +450,8 @@ $('#layerBtn').onclick = () => {
 // Si el panel tapa la parte de abajo del mapa en el celular, corremos el centro hacia arriba
 function flyToPoint(latlng, zoom) {
   const z = zoom ?? Math.max(map.getZoom(), 17);
-  if (!isMobile() || (view === 'report' && step === 'loc')) return map.flyTo(latlng, z, { duration: .5 });
+  // con el mapa girado no corremos el centro (el corrimiento en pantalla ya no es "hacia arriba" en el mapa)
+  if (!isMobile() || (view === 'report' && step === 'loc') || bearing() !== 0) return map.flyTo(latlng, z, { duration: .5 });
   const offsetPx = $('#panel').offsetHeight / 2;
   const p = map.project(latlng, z).add([0, offsetPx]);
   map.flyTo(map.unproject(p, z), z, { duration: .5 });
@@ -393,23 +472,69 @@ function renderMarkers() {
   });
 }
 
-// Mi ubicación
-let meMarker = null;
+// ================= Mi ubicación =================
+// En vez de pedir una sola posición (que suele venir imprecisa, de wifi o antena),
+// escuchamos el GPS unos segundos y nos quedamos con la mejor lectura.
+const GEO_GOOD = 20;        // metros: con esto ya alcanza para ubicar la cuadra
+const GEO_ROUGH = 60;       // metros: más que esto, avisamos que es aproximada
+const GEO_MAX_WAIT = 15000; // ms: tiempo máximo esperando una buena señal
+let meMarker = null, meCircle = null, lastFix = null, locating = null;
 $('#locateBtn').onclick = () => locateMe(true);
+
+function geoErrorMsg(err) {
+  if (err?.code === 1) return 'El permiso de ubicación está bloqueado. Tocá el candado de la barra de direcciones (o Ajustes del navegador → Ubicación), permitilo y probá de nuevo.';
+  if (err?.code === 2) return 'El celular no está dando la ubicación. Revisá que el GPS esté activado, o mové el mapa a mano.';
+  return 'No pudimos ubicarte a tiempo. Probá a cielo abierto, o mové el mapa a mano.';
+}
+function setLocBusy(on) {
+  document.querySelectorAll('#locateBtn, [data-act="gps"]').forEach(b => { b.classList.toggle('animate-pulse', on); b.classList.toggle('text-blue-600', on); b.disabled = on; });
+}
+function showMe(ll, acc) {
+  if (!meMarker) meMarker = L.marker(ll, { icon: L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: '<div class="me-dot"></div>' }), interactive: false, zIndexOffset: 500 }).addTo(map);
+  else meMarker.setLatLng(ll);
+  if (!meCircle) meCircle = L.circle(ll, { radius: acc, color: '#2563eb', weight: 1, fillColor: '#3b82f6', fillOpacity: .12, interactive: false }).addTo(map);
+  else meCircle.setLatLng(ll).setRadius(acc);
+}
+// Cuanto más imprecisa la lectura, más lejos mostramos el mapa para que entre el círculo
+const zoomForAcc = (acc) => acc <= 25 ? 18 : acc <= 80 ? 17 : acc <= 300 ? 16 : 15;
+
 function locateMe(fly) {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) { toast('Tu dispositivo no permite ubicar'); return resolve(null); }
+  if (locating) return locating; // ya hay una búsqueda en curso
+  locating = new Promise((resolve) => {
+    if (!navigator.geolocation) { toast('Este navegador no permite ubicarte. Mové el mapa a mano.'); return resolve(null); }
+    if (!window.isSecureContext) { toast('La ubicación solo funciona abriendo la app desde su link (https). Mové el mapa a mano.'); return resolve(null); }
+    setLocBusy(true);
     toast('Buscando tu ubicación...');
-    navigator.geolocation.getCurrentPosition(p => {
-      const ll = L.latLng(p.coords.latitude, p.coords.longitude);
-      if (ll.distanceTo(TOWN.center) > 25000) { toast('Estás fuera de San Roque. Te mostramos el centro.'); if (fly) flyToPoint(TOWN.center, 16); return resolve(null); }
-      if (meMarker) map.removeLayer(meMarker);
-      meMarker = L.marker(ll, { icon: L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: '<div class="me-dot"></div>' }), interactive: false }).addTo(map);
-      if (fly) flyToPoint(ll, 18);
-      $('#toast').classList.add('hidden');
+    let best = null, done = false, userMoved = false, watchId = null, timer = null;
+    const onDrag = () => { userMoved = true; }; // si la persona mueve el mapa, dejamos de seguir al GPS
+    map.on('dragstart', onDrag);
+    const finish = (ll, msg) => {
+      if (done) return; done = true;
+      if (watchId != null) navigator.geolocation.clearWatch(watchId);
+      clearTimeout(timer); map.off('dragstart', onDrag); setLocBusy(false);
+      if (msg) toast(msg);
+      updateLocText();
       resolve(ll);
-    }, () => { toast('No pudimos obtener tu ubicación. Activá el GPS o mové el mapa.'); resolve(null); }, { enableHighAccuracy: true, timeout: 8000 });
-  });
+    };
+    const finalMsg = () => best.acc <= GEO_ROUGH ? `Te encontramos (precisión ±${best.acc} m)` : `Ubicación aproximada (±${best.acc} m). Mové el mapa hasta el lugar exacto.`;
+    watchId = navigator.geolocation.watchPosition((p) => {
+      const ll = L.latLng(p.coords.latitude, p.coords.longitude), acc = Math.max(1, Math.round(p.coords.accuracy));
+      if (ll.distanceTo(TOWN.center) > 25000) { if (fly) flyToPoint(TOWN.center, 16); return finish(null, 'Estás fuera de San Roque. Te mostramos el centro.'); }
+      if (best && acc >= best.acc) return; // solo nos interesan lecturas mejores
+      const moved = !best || best.ll.distanceTo(ll) > 5;
+      best = { ll, acc }; lastFix = { ll, acc, at: Date.now() };
+      showMe(ll, acc);
+      if (fly && !userMoved && moved) flyToPoint(ll, zoomForAcc(acc));
+      if (acc <= GEO_GOOD) return finish(ll, finalMsg());
+      toast(`Mejorando la precisión... ±${acc} m`);
+      updateLocText();
+    }, (err) => {
+      if (best) return finish(best.ll, finalMsg());
+      finish(null, geoErrorMsg(err));
+    }, { enableHighAccuracy: true, maximumAge: 5000, timeout: GEO_MAX_WAIT });
+    timer = setTimeout(() => best ? finish(best.ll, finalMsg()) : finish(null, geoErrorMsg({ code: 3 })), GEO_MAX_WAIT);
+  }).finally(() => { locating = null; });
+  return locating;
 }
 
 // ================= Buscador de calles (Photon / OpenStreetMap) =================
@@ -488,6 +613,16 @@ function updateLocText() {
     : draft.street ? `<span class="font-medium">Cerca de ${esc(draft.street)}</span>`
     : `<span class="text-slate-500">Punto ${draft.lat.toFixed(5)}, ${draft.lng.toFixed(5)}</span>`;
   const hint = $('#zoomHint'); if (hint) hint.classList.toggle('hidden', zoomOk);
+  // Si el pin está sobre la posición del GPS, mostramos qué tan precisa es
+  const gps = $('#gpsHint'); if (!gps) return;
+  const onFix = lastFix && draft.lat != null && lastFix.ll.distanceTo([draft.lat, draft.lng]) < 5;
+  gps.classList.toggle('hidden', !onFix);
+  if (onFix) {
+    const ok = lastFix.acc <= GEO_ROUGH;
+    gps.className = `text-xs flex items-center gap-1 ${ok ? 'text-blue-700' : 'text-amber-700'}`;
+    gps.innerHTML = ok ? `${icon('locate')} Ubicado con GPS (±${lastFix.acc} m)`
+      : `${icon('alert')} El GPS es aproximado (±${lastFix.acc} m). Mové el mapa hasta el lugar exacto.`;
+  }
 }
 
 // ================= Panel =================
@@ -500,53 +635,87 @@ function header(title, subtitle) {
     <div><div class="font-semibold">${title}</div>${subtitle ? `<div class="text-xs text-slate-500">${subtitle}</div>` : ''}</div></div>`;
 }
 
+// Inicio: solo lo esencial, para que entre sin desplazarse. Puntos, Novedades y Resumen van en pestañas abajo.
 function homeView() {
   const c = counts(), up = upcoming(), next = up[0];
   const hour = new Date().getHours();
   const greet = hour < 13 ? 'Buen día' : hour < 20 ? 'Buenas tardes' : 'Buenas noches';
+  const vol = state.reports.reduce((n, r) => n + (r.volunteers || 0), 0);
+  const dengue = state.reports.filter(r => r.status !== 'green' && waterRisk(r));
+  const joined = next && state.joined.includes(next.id);
+  const nd = next ? new Date(next.scheduledAt) : null;
   return `<div class="px-4 pt-2 pb-4 space-y-3 fade-in">
     <div>
       <div class="text-xl font-semibold">${greet}${userName ? ', ' + esc(userName) : ''}</div>
-      <div class="text-sm text-slate-500">¿Qué querés hacer hoy?</div>
+      <div class="text-sm text-slate-500">${c.green || vol ? `Entre todos: <b class="text-emerald-700 font-semibold">${c.green} ${pl(c.green, 'lugar recuperado', 'lugares recuperados')}</b> y ${vol} vecinos anotados.` : '¿Qué querés hacer hoy?'}</div>
     </div>
-    <button data-go="report" class="w-full flex items-center gap-3 rounded-xl bg-red-600 hover:bg-red-700 active:scale-[.99] transition text-white p-4 text-left">
-      <span class="w-11 h-11 rounded-lg bg-white/15 flex items-center justify-center">${icon('megaphone', 'w-6 h-6')}</span>
-      <span class="flex-1"><span class="block font-semibold text-[17px]">Quiero reportar un basural</span><span class="block text-sm text-red-100">Marcás el lugar y sacás una foto</span></span>${icon('chevron', 'w-5 h-5')}
+    <button data-go="report" class="w-full flex items-center gap-3 rounded-xl bg-red-600 hover:bg-red-700 active:scale-[.99] transition text-white p-4 text-left shadow-sm">
+      <span class="w-11 h-11 rounded-lg bg-white/15 flex items-center justify-center shrink-0">${icon('megaphone', 'w-6 h-6')}</span>
+      <span class="flex-1"><span class="block font-semibold text-[17px]">Reportar un basural</span><span class="block text-sm text-red-100">Marcás el lugar y sacás una foto</span></span>${icon('chevron', 'w-5 h-5')}
     </button>
-    <button data-go="join" class="w-full flex items-center gap-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-[.99] transition text-white p-4 text-left">
-      <span class="w-11 h-11 rounded-lg bg-white/15 flex items-center justify-center">${icon('users', 'w-6 h-6')}</span>
-      <span class="flex-1"><span class="block font-semibold text-[17px]">Quiero sumarme a una limpieza</span><span class="block text-sm text-emerald-100">${up.length ? `${up.length} ${up.length === 1 ? 'jornada próxima' : 'jornadas próximas'}` : 'Ver dónde hace falta ayuda'}</span></span>${icon('chevron', 'w-5 h-5')}
+    <button data-go="join" class="w-full flex items-center gap-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-[.99] transition text-white p-4 text-left shadow-sm">
+      <span class="w-11 h-11 rounded-lg bg-white/15 flex items-center justify-center shrink-0">${icon('users', 'w-6 h-6')}</span>
+      <span class="flex-1"><span class="block font-semibold text-[17px]">Sumarme a una limpieza</span><span class="block text-sm text-emerald-100">${up.length ? `${up.length} ${pl(up.length, 'jornada próxima', 'jornadas próximas')}` : 'Ver dónde hace falta ayuda'}</span></span>${icon('chevron', 'w-5 h-5')}
     </button>
-    <button data-go="list" class="w-full flex items-center gap-3 rounded-xl ring-1 ring-slate-200 hover:bg-slate-50 p-4 text-left">
-      <span class="w-11 h-11 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center">${icon('list', 'w-6 h-6')}</span>
-      <span class="flex-1"><span class="block font-semibold">Ver todos los puntos</span>
-        <span class="flex gap-3 text-xs mt-0.5"><span class="text-red-700">${c.red} reportados</span><span class="text-amber-700">${c.yellow} programados</span><span class="text-green-700">${c.green} limpios</span></span></span>${icon('chevron', 'w-5 h-5 text-slate-400')}
-    </button>
-    <button data-act="summary" class="w-full flex items-center gap-3 rounded-xl ring-1 ring-slate-200 hover:bg-slate-50 p-4 text-left">
-      <span class="w-11 h-11 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center">${icon('chart', 'w-6 h-6')}</span>
-      <span class="flex-1"><span class="block font-semibold">Resumen y estadísticas</span><span class="block text-xs text-slate-500">Cuánto se limpió, en cuánto tiempo y qué falta</span></span>${icon('chevron', 'w-5 h-5 text-slate-400')}
-    </button>
-    ${next ? `<div class="rounded-xl bg-amber-50 ring-1 ring-amber-200 p-3">
-      <div class="text-xs font-medium text-amber-800 uppercase tracking-wide">Próxima limpieza · ${untilText(next.scheduledAt)}</div>
-      <div class="font-semibold mt-1">${esc(next.address)}</div>
-      <div class="text-sm text-slate-600">${fmtShort(next.scheduledAt)} · ${next.volunteers} anotados</div>
-      <div class="flex gap-2 mt-2">
-        <button data-join="${next.id}" class="flex-1 rounded-lg py-2 text-sm font-medium ${state.joined.includes(next.id) ? 'bg-white ring-1 ring-emerald-300 text-emerald-800' : 'bg-emerald-700 text-white'}">${state.joined.includes(next.id) ? 'Ya estás anotado' : 'Me sumo'}</button>
-        <button data-id="${next.id}" class="rounded-lg py-2 px-4 text-sm font-medium bg-white ring-1 ring-slate-200">Ver</button>
-      </div></div>` : ''}
-    ${feedHTML()}
+    ${dengue.length ? `<button data-id="${dengue[0].id}" class="w-full flex items-center gap-2 rounded-lg bg-red-50 ring-1 ring-red-200 px-3 py-2 text-left text-sm text-red-900">
+      <span class="text-red-600">${icon('alert', 'w-4 h-4')}</span><span class="flex-1 min-w-0 truncate"><b class="font-semibold">Riesgo de dengue:</b> ${esc(dengue[0].address)}${dengue.length > 1 ? ` y ${dengue.length - 1} más` : ''}</span>${icon('chevron', 'w-4 h-4 text-red-400')}</button>` : ''}
+    ${next ? `<div class="flex items-center gap-3 rounded-xl bg-amber-50 ring-1 ring-amber-200 p-2.5">
+      <button data-id="${next.id}" class="flex items-center gap-3 flex-1 min-w-0 text-left">
+        <span class="w-12 shrink-0 rounded-lg bg-white ring-1 ring-amber-200 text-center py-1">
+          <span class="block text-[10px] uppercase font-semibold text-amber-700">${nd.toLocaleDateString('es-AR', { month: 'short' }).replace('.', '')}</span>
+          <span class="block text-xl font-bold leading-none text-slate-900">${nd.getDate()}</span></span>
+        <span class="min-w-0"><span class="block text-[11px] font-semibold text-amber-800 uppercase tracking-wide">Próxima limpieza · ${untilText(next.scheduledAt)}</span>
+          <span class="block font-semibold text-sm truncate">${esc(next.address)}</span>
+          <span class="block text-xs text-slate-600">${nd.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })} h · ${next.volunteers} ${pl(next.volunteers, 'anotado', 'anotados')}</span></span>
+      </button>
+      <button data-join="${next.id}" class="shrink-0 rounded-lg px-3 py-2 text-sm font-semibold ${joined ? 'bg-white ring-1 ring-emerald-300 text-emerald-800' : 'bg-emerald-700 text-white'}">${joined ? icon('check') + ' Anotado' : 'Me sumo'}</button>
+    </div>` : ''}
   </div>`;
 }
+
+// Pestaña "Puntos": estados con filtro + lista
+function pointsStats() {
+  const c = counts(), total = c.red + c.yellow + c.green;
+  const seg = (n, color) => n ? `<div class="${color}" style="width:${n * 100 / total}%"></div>` : '';
+  const chip = (f, n, label, sub, cls, on) => `<button data-f="${f}" class="rounded-lg px-2 py-2 text-left transition ${on ? 'ring-2 ring-slate-900 ' : ''}${cls}">
+      <span class="block text-lg font-bold leading-none tabular-nums">${n}</span>
+      <span class="block text-xs font-medium mt-1">${label}</span><span class="block text-[11px] opacity-70">${sub}</span></button>`;
+  return `<div class="px-4 pt-3">
+    ${total ? `<div class="flex h-1.5 rounded-full overflow-hidden bg-slate-100">${seg(c.red, 'bg-red-600')}${seg(c.yellow, 'bg-amber-500')}${seg(c.green, 'bg-green-600')}</div>` : ''}
+    <div class="grid grid-cols-3 gap-2 mt-2">
+      ${chip('red', c.red, pl(c.red, 'Reportado', 'Reportados'), 'sin fecha', 'bg-red-50 text-red-800', filter === 'red')}
+      ${chip('yellow', c.yellow, pl(c.yellow, 'Programado', 'Programados'), 'con fecha', 'bg-amber-50 text-amber-900', filter === 'yellow')}
+      ${chip('green', c.green, pl(c.green, 'Limpio', 'Limpios'), 'recuperados', 'bg-green-50 text-green-800', filter === 'green')}
+    </div>
+    ${filter !== 'all' ? `<button data-f="all" class="mt-2 text-sm font-medium text-emerald-700">Ver todos (${total})</button>` : ''}
+  </div>`;
+}
+
+// Pestaña "Novedades"
+function feedView() {
+  return `<div class="px-4 pt-3 pb-1"><div class="font-semibold text-lg">Novedades del barrio</div><div class="text-xs text-slate-500">Lo último que hicieron los vecinos</div></div>
+    <div class="px-4 pb-4 fade-in">${feedHTML(30) || '<div class="text-center text-slate-400 py-10 text-sm">Todavía no hay novedades.</div>'}</div>`;
+}
+
 // Novedades del barrio: últimas acciones de los vecinos en todos los puntos
-function feedHTML() {
-  const items = state.reports.flatMap(r => (r.history || []).map(h => ({ ...h, r }))).sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 4);
-  if (!items.length) return '';
-  return `<div class="pt-1">
-    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Novedades del barrio</div>
-    <div class="divide-y divide-slate-100">${items.map(i => `<button data-id="${i.r.id}" class="w-full text-left flex gap-3 py-2.5">
-      <span class="w-2 h-2 mt-1.5 shrink-0 rounded-full ${STATUS[i.r.status].dot}"></span>
-      <span class="min-w-0"><span class="block text-sm"><b class="font-medium">${esc(i.by)}</b> ${esc(i.text.charAt(0).toLowerCase() + i.text.slice(1))}</span>
-      <span class="block text-xs text-slate-400 truncate">${esc(i.r.address)} · ${relTime(i.at)}</span></span></button>`).join('')}</div></div>`;
+const FEED_KIND = [
+  [/^Report/i,        'megaphone', 'bg-red-100 text-red-700'],
+  [/^Program/i,       'calendar',  'bg-amber-100 text-amber-800'],
+  [/limpio|limpiamos/i, 'check',   'bg-green-100 text-green-700'],
+  [/^Reabri/i,        'alert',     'bg-red-100 text-red-700'],
+  [/anot|sum/i,       'users',     'bg-emerald-100 text-emerald-700'],
+  [/^Coment/i,        'chat',      'bg-slate-100 text-slate-600'],
+];
+function feedHTML(max = 30) {
+  const all = state.reports.flatMap(r => (r.history || []).map(h => ({ ...h, r }))).sort((a, b) => new Date(b.at) - new Date(a.at));
+  if (!all.length) return '';
+  const items = all.slice(0, max);
+  const kind = (t) => FEED_KIND.find(([re]) => re.test(t)) || [null, 'info', 'bg-slate-100 text-slate-600'];
+  return `<div class="divide-y divide-slate-100">${items.map(i => { const [, ic, cls] = kind(i.text);
+      return `<button data-id="${i.r.id}" class="w-full text-left flex gap-3 py-2.5 hover:bg-slate-50 rounded-lg">
+      <span class="w-8 h-8 shrink-0 rounded-full flex items-center justify-center ${cls}">${icon(ic, 'w-4 h-4')}</span>
+      <span class="min-w-0 flex-1"><span class="block text-sm leading-snug"><b class="font-medium">${esc(i.by)}</b> ${esc(i.text.charAt(0).toLowerCase() + i.text.slice(1))}</span>
+      <span class="block text-xs text-slate-400 truncate mt-0.5">${esc(i.r.address)} · ${relTime(i.at)}</span></span></button>`; }).join('')}</div>`;
 }
 
 function cardHTML(r) {
@@ -567,9 +736,9 @@ function listView() {
   const order = { red: 0, yellow: 1, green: 2 };
   const items = state.reports.filter(r => filter === 'all' || r.status === filter).sort((a, b) => order[a.status] - order[b.status] || new Date(b.reportedAt) - new Date(a.reportedAt));
   const fb = (f, l) => `<button data-f="${f}" class="shrink-0 text-sm rounded-full px-3 py-1.5 ${filter === f ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}">${l}</button>`;
-  return header('Todos los puntos', `${state.reports.length} en San Roque`) +
-    `<div class="flex gap-1.5 px-4 py-2.5 overflow-x-auto">${fb('all', 'Todos')}${fb('red', 'Reportados')}${fb('yellow', 'Programados')}${fb('green', 'Limpios')}</div>
-     <div class="divide-y divide-slate-100 fade-in">${items.length ? items.map(cardHTML).join('') : '<div class="text-center text-slate-400 py-10 text-sm">No hay puntos en este estado.</div>'}</div>`;
+  return `<div class="px-4 pt-3"><div class="font-semibold text-lg">Puntos en el mapa</div><div class="text-xs text-slate-500">${state.reports.length} en San Roque · tocá un estado para filtrar</div></div>` +
+    pointsStats() +
+    `<div class="divide-y divide-slate-100 fade-in mt-2">${items.length ? items.map(cardHTML).join('') : '<div class="text-center text-slate-400 py-10 text-sm">No hay puntos en este estado.</div>'}</div>`;
 }
 
 function joinView() {
@@ -604,6 +773,7 @@ function reportView() {
       <div class="text-sm text-slate-500">Mové el mapa hasta que el pin rojo quede justo encima. Podés buscar la calle arriba.</div></div>
       <div class="flex items-center gap-2 rounded-lg bg-slate-50 ring-1 ring-slate-200 px-3 py-2.5 text-sm">${icon('pin', 'w-4 h-4 text-red-600')}<span id="locText"></span></div>
       <div id="zoomHint" class="hidden text-xs text-amber-700 flex items-center gap-1">${icon('alert')} Acercá más el mapa para ubicarlo bien en la cuadra.</div>
+      <div id="gpsHint" class="hidden"></div>
       <div class="grid grid-cols-2 gap-2">
         <button data-act="gps" class="rounded-lg ring-1 ring-slate-300 py-3 text-sm font-medium flex items-center justify-center gap-1.5">${icon('locate')} Estoy acá</button>
         <button data-act="confirmLoc" class="rounded-lg bg-red-600 hover:bg-red-700 text-white py-3 text-sm font-semibold">Confirmar lugar</button>
@@ -635,7 +805,8 @@ function doneView() {
   return `<div class="px-6 py-6 text-center space-y-3 fade-in">
     <div class="w-14 h-14 mx-auto rounded-full bg-green-100 text-green-700 flex items-center justify-center">${icon('check', 'w-8 h-8')}</div>
     <div class="text-xl font-semibold">Gracias${userName ? ', ' + esc(userName) : ''}</div>
-    <p class="text-sm text-slate-600">Tu reporte ya está en el mapa${r?.address ? ` (${esc(r.address)})` : ''}. Te anotamos como primer voluntario. Compartilo para que se sumen más vecinos.</p>
+    ${r ? `<div class="inline-block rounded-lg bg-slate-100 px-4 py-2"><div class="text-xs text-slate-500">Tu número de reclamo</div><div class="text-2xl font-bold font-mono tracking-wider">${claimNo(r)}</div></div>` : ''}
+    <p class="text-sm text-slate-600">Tu reclamo ya está en el mapa${r?.address ? ` (${esc(r.address)})` : ''} y le llega a la Municipalidad. Cuando lo programen o lo resuelvan, lo vas a ver en la ficha del punto. Compartilo para que se sumen más vecinos.</p>
     <div class="grid grid-cols-2 gap-2 pt-2">
       <button data-act="shareNew" class="rounded-lg ring-1 ring-slate-300 py-3 text-sm font-medium flex items-center justify-center gap-1.5">${icon('share')} Compartir</button>
       <button data-id="${lastCreatedId}" class="rounded-lg ring-1 ring-slate-300 py-3 text-sm font-medium">Ver reporte</button>
@@ -645,8 +816,15 @@ function doneView() {
 
 function renderPanel() {
   const body = $('#panelBody');
-  body.innerHTML = view === 'home' ? homeView() : view === 'list' ? listView() : view === 'join' ? joinView() : view === 'report' ? reportView() : doneView();
+  body.innerHTML = view === 'home' ? homeView() : view === 'list' ? listView() : view === 'feed' ? feedView() : view === 'join' ? joinView() : view === 'report' ? reportView() : doneView();
   body.scrollTop = 0;
+  // Pestañas: se ocultan mientras se carga un reporte; se marca la sección actual
+  $('#tabBar').classList.toggle('hidden', view === 'report');
+  const activeTab = view === 'join' || view === 'done' ? 'home' : view;
+  document.querySelectorAll('#tabBar [data-tabgo]').forEach(b => {
+    const on = b.dataset.tabgo === activeTab;
+    b.classList.toggle('text-emerald-700', on); b.classList.toggle('text-slate-500', !on);
+  });
   $('#centerPin').classList.toggle('hidden', !(view === 'report' && step === 'loc'));
   if (view === 'report' && step === 'loc') updateLocText();
   const pf = $('#photoFile'); if (pf) pf.onchange = onPhoto;
@@ -664,6 +842,10 @@ function startReport() {
   if (map.getZoom() < 17) map.setZoom(17); else map.fire('moveend');
   renderPanel();
   toast('Mové el mapa hasta que el pin quede sobre el basural');
+  // Si la persona ya dio permiso de ubicación antes, la ubicamos sola (sin volver a preguntar)
+  navigator.permissions?.query({ name: 'geolocation' }).then(s => {
+    if (s.state === 'granted' && view === 'report' && step === 'loc') locateMe(true);
+  }).catch(() => {});
 }
 function saveStepFields() { if ($('#addr')) draft.address = $('#addr').value; if ($('#desc')) draft.desc = $('#desc').value; }
 function onPhoto(e) {
@@ -787,7 +969,7 @@ function renderDetail(r, mode) {
         <button data-act="clean" class="inline-flex items-center justify-center gap-1.5 rounded-lg ring-1 ring-slate-300 py-2.5 text-sm font-medium">${icon('check')} Ya está limpio</button></div>
       <button data-act="share" class="w-full inline-flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm text-slate-600 hover:bg-slate-50">${icon('share')} Compartir por WhatsApp</button>`;
   }
-  const hasWater = /cubierta|agua|neumátic/i.test(r.desc || '');
+  const hasWater = waterRisk(r); // mismo criterio que el resumen
   const before = r.photo || placeholder(r.type);
   const hero = r.status === 'green'
     ? `<div class="grid grid-cols-2 gap-0.5">
@@ -813,6 +995,9 @@ function renderDetail(r, mode) {
       <button data-act="close" class="absolute top-3 right-3 p-1.5 rounded-md bg-white/90 shadow">${icon('x', 'w-5 h-5')}</button></div>
     <div class="p-5 space-y-4">
       <div><span class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded ring-1 ${st.badge}"><span class="w-1.5 h-1.5 rounded-full ${st.dot}"></span>${st.label}</span>
+        <span class="ml-1 text-xs font-mono text-slate-400">Reclamo ${claimNo(r)}</span>
+        ${(state.today || []).includes(r.id) && r.status !== 'green' ? `<div class="mt-2 flex items-center gap-1.5 text-xs font-medium text-blue-800 bg-blue-50 ring-1 ring-blue-200 rounded-md px-2 py-1">${icon('truck', 'w-4 h-4')} La Municipalidad pasa hoy a retirarlo</div>` : ''}
+        ${r.status === 'green' && r.cleanedBy === CREW ? `<div class="mt-2 flex items-center gap-1.5 text-xs font-medium text-green-800 bg-green-50 ring-1 ring-green-200 rounded-md px-2 py-1">${icon('check', 'w-4 h-4')} Resuelto por la Municipalidad</div>` : ''}
         <h2 class="text-lg font-semibold mt-2">${esc(r.address || 'Sin referencia')}</h2>
         <p class="text-sm text-slate-500">${esc(r.type)} · ${esc(r.size)} (${SIZES[r.size].toLowerCase()})${r.demo ? ' · <span class="text-slate-400">punto de ejemplo</span>' : ''}</p></div>
       ${r.desc ? `<p class="text-sm text-slate-700">${esc(r.desc)}</p>` : ''}
@@ -887,7 +1072,7 @@ const openInfo = () => { showTab('problema'); openModal('infoModal'); };
 $('#infoBtn').onclick = openInfo; $('#welcomeInfo').onclick = openInfo;
 $('#infoModal [data-close]').onclick = () => closeModal('infoModal');
 ['detailModal', 'infoModal'].forEach(id => $('#' + id).addEventListener('click', (e) => { if (e.target.id === id) closeModal(id); }));
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal('detailModal'); closeModal('infoModal'); closeModal('summaryModal'); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal('detailModal'); closeModal('infoModal'); closeModal('summaryModal'); closeModal('adminModal'); } });
 
 $('#enterBtn').onclick = () => {
   userName = $('#nameInput').value.trim();
@@ -998,130 +1183,644 @@ $('#removeDemoBtn').onclick = () => {
 };
 
 // ================= Resumen y estadísticas =================
-// Volumen aproximado por tamaño (m³). Es una estimación para dar una idea, no una medición.
+// Está armado en tres capas para poder pasarlo tal cual a React/TypeScript en la Etapa C:
+//   1) DATOS:   toRecord() convierte cada reporte crudo en un registro analítico plano.
+//   2) CÁLCULO: computeStats() y executiveSummary() son funciones puras (no tocan la pantalla).
+//   3) DIBUJO:  renderSummary() solo arma el HTML con lo que ya está calculado.
+// Con reportes reales todo se recalcula solo; los puntos de ejemplo se marcan con demo = true.
+
+// ---------- 1) Datos ----------
+/** Volumen estimado por categoría de tamaño (m³). Es una estimación, no una medición. */
 const VOLUME = { Chico: 0.3, Mediano: 2, Grande: 8 };
-const waterRisk = (r) => /cubierta|neum[aá]tic|agua|balde|bidón|botella|cacharro/i.test(r.desc || '');
+/** Riesgo de dengue: por ahora se detecta por palabras clave en la descripción (heurística). */
+const waterRisk = (r) => /cubierta|neum[aá]tic|agua|balde|bid[oó]n|botella|cacharro/i.test(r.desc || '');
+const DAY_MS = 86400000;
+
+/**
+ * Taxonomía única de estados. Pendiente = sin_programar + programado.
+ * @typedef {'sin_programar'|'programado'|'limpio'} Estado
+ * @typedef {Object} SummaryRecord
+ * @property {number} id
+ * @property {Estado} estado
+ * @property {Date} fecha_reporte
+ * @property {Date|null} fecha_programada
+ * @property {Date|null} fecha_limpieza
+ * @property {number} voluntarios
+ * @property {number} volumen_m3          estimado según el tamaño
+ * @property {boolean} tiene_foto
+ * @property {boolean} tiene_foto_despues
+ * @property {boolean} riesgo_dengue
+ * @property {string|null} tipo_residuo
+ * @property {string|null} tamano
+ * @property {string} lugar
+ * @property {boolean} demo
+ * @property {boolean} reabierto
+ * @property {Date} ultima_actividad
+ */
+const ESTADO = { red: 'sin_programar', yellow: 'programado', green: 'limpio' };
+const ESTADO_ORDEN = ['sin_programar', 'programado', 'limpio'];
+const ESTADO_UI = {
+  sin_programar: { label: 'Sin programar', hint: 'reportado, todavía sin fecha', color: '#dc2626', ink: '#fff',    text: 'text-red-700' },
+  programado:    { label: 'Programado',    hint: 'con fecha de limpieza',        color: '#f59e0b', ink: '#451a03', text: 'text-amber-700' },
+  limpio:        { label: 'Limpio',        hint: 'resuelto',                     color: '#16a34a', ink: '#fff',    text: 'text-green-700' },
+};
+
+/** @returns {SummaryRecord} */
+function toRecord(r) {
+  const d = (x) => x ? new Date(x) : null;
+  const hist = r.history || [];
+  const times = [r.reportedAt, r.cleanedAt, ...hist.map(h => h.at)].filter(Boolean).map(x => new Date(x).getTime()).filter(Number.isFinite);
+  return {
+    id: r.id, estado: ESTADO[r.status] || 'sin_programar',
+    fecha_reporte: new Date(r.reportedAt), fecha_programada: d(r.scheduledAt), fecha_limpieza: d(r.cleanedAt),
+    voluntarios: r.volunteers || 0, volumen_m3: VOLUME[r.size] ?? 0,
+    tiene_foto: !!r.photo, tiene_foto_despues: !!r.afterPhoto,
+    riesgo_dengue: waterRisk(r),
+    tipo_residuo: TYPES.includes(r.type) ? r.type : null,
+    tamano: VOLUME[r.size] != null ? r.size : null,
+    lugar: r.address || 'Sin referencia', demo: !!r.demo,
+    reabierto: hist.some(h => /^Reabrió/.test(h.text)),
+    ultima_actividad: new Date(Math.max(...times)),
+  };
+}
+
+// ---------- 2) Cálculo (funciones puras) ----------
+const sumBy = (arr, f) => arr.reduce((n, x) => n + f(x), 0);
+const ratio = (a, b) => b ? a / b : null;
+/** Porcentajes enteros que suman exactamente 100 (método del mayor resto). */
+function pctParts(counts) {
+  const total = counts.reduce((a, b) => a + b, 0); if (!total) return counts.map(() => 0);
+  const raw = counts.map(c => c * 100 / total), out = raw.map(Math.floor);
+  let rest = 100 - out.reduce((a, b) => a + b, 0);
+  raw.map((v, i) => [v - out[i], i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (rest > 0) { out[i]++; rest--; } });
+  return out;
+}
+function startOfWeek(ts) { const d = new Date(ts); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); }
+
+/** @param {SummaryRecord[]} R  @param {number} now */
+function computeStats(R, now = Date.now()) {
+  const by = (e) => R.filter(r => r.estado === e);
+  const sinProg = by('sin_programar'), prog = by('programado'), limpio = by('limpio');
+  const pend = [...sinProg, ...prog];
+  const today0 = new Date(now).setHours(0, 0, 0, 0);
+  const ciclos = limpio.filter(r => r.fecha_limpieza).map(r => Math.max(0, (r.fecha_limpieza - r.fecha_reporte) / DAY_MS));
+  const [pS, pP, pL] = pctParts([sinProg.length, prog.length, limpio.length]);
+
+  // Series semanales (lunes a domingo), con acumulados desde el primer reporte
+  const mon = startOfWeek(now), first = mon - 7 * 7 * DAY_MS;
+  let acumRep = R.filter(r => r.fecha_reporte < first).length;
+  let acumCln = R.filter(r => r.fecha_limpieza && r.fecha_limpieza < first).length;
+  const semanas = [];
+  for (let i = 0; i < 8; i++) {
+    const s = first + i * 7 * DAY_MS, e = s + 7 * DAY_MS;
+    const rep = R.filter(r => r.fecha_reporte >= s && r.fecha_reporte < e).length;
+    const cln = R.filter(r => r.fecha_limpieza && r.fecha_limpieza >= s && r.fecha_limpieza < e).length;
+    acumRep += rep; acumCln += cln;
+    const prev = semanas[i - 1];
+    semanas.push({ inicio: s, rep, cln, acumRep, acumCln, abiertos: acumRep - acumCln, deltaRep: prev ? rep - prev.rep : null, deltaCln: prev ? cln - prev.cln : null, actual: i === 7 });
+  }
+
+  const tipos = TYPES.map(t => ({ clave: t, n: R.filter(r => r.tipo_residuo === t).length, limpios: R.filter(r => r.tipo_residuo === t && r.estado === 'limpio').length })).sort((a, b) => b.n - a.n);
+  const tamanos = Object.keys(SIZES).map(t => ({ clave: t, n: R.filter(r => r.tamano === t).length, m3: VOLUME[t] }));
+  const m3Retirado = sumBy(limpio, r => r.volumen_m3), m3Pendiente = sumBy(pend, r => r.volumen_m3);
+  const voluntarios = sumBy(R, r => r.voluntarios);
+  const conFoto = R.filter(r => r.tiene_foto).length;
+  return {
+    total: R.length,
+    estados: { sin_programar: sinProg.length, programado: prog.length, limpio: limpio.length },
+    pctEstado: { sin_programar: pS, programado: pP, limpio: pL },
+    pendientes: pend.length,
+    tasaResolucion: ratio(limpio.length, R.length),
+    cicloPromedioDias: ciclos.length ? ciclos.reduce((a, b) => a + b, 0) / ciclos.length : null, ciclosN: ciclos.length,
+    voluntarios, voluntariosPorPunto: ratio(voluntarios, R.length),
+    m3Retirado, m3Pendiente, m3PorLimpio: ratio(m3Retirado, limpio.length), m3PorPendiente: ratio(m3Pendiente, pend.length),
+    necesitanCamion: pend.filter(r => r.tamano === 'Grande').length,
+    proximos: prog.filter(r => r.fecha_programada && r.fecha_programada >= today0).sort((a, b) => a.fecha_programada - b.fecha_programada),
+    vencidos: prog.filter(r => r.fecha_programada && r.fecha_programada < today0).length,
+    dengue: pend.filter(r => r.riesgo_dengue).sort((a, b) => a.fecha_reporte - b.fecha_reporte),
+    conFoto, fotoCobertura: ratio(conFoto, R.length),
+    fotoDespues: limpio.filter(r => r.tiene_foto_despues).length,
+    sinFechaRatio: ratio(sinProg.length, pend.length),
+    reabiertos: R.filter(r => r.reabierto).length,
+    semanas, tipos, tamanos, tiposN: sumBy(tipos, t => t.n), tamanosN: sumBy(tamanos, t => t.n),
+    masAntiguos: pend.slice().sort((a, b) => a.fecha_reporte - b.fecha_reporte).slice(0, 6),
+    ultimaActualizacion: R.length ? new Date(Math.max(...R.map(r => r.ultima_actividad.getTime()))) : null,
+  };
+}
+
+const fmtNum = (n, d = 0) => (n ?? 0).toLocaleString('es-AR', { maximumFractionDigits: d, minimumFractionDigits: 0 });
+const fmtPct = (r) => r == null ? '—' : `${Math.round(r * 100)}%`;
+function fmtDays(d) { if (d < 1) return 'menos de 1 día'; const n = Math.round(d); return `${n} ${n === 1 ? 'día' : 'días'}`; }
+const pl = (n, uno, varios) => n === 1 ? uno : varios;
+
+/** Resumen ejecutivo: devuelve frases (HTML) a partir de las métricas, sin tocar la pantalla. */
+function executiveSummary(s) {
+  if (!s.total) return ['Todavía no hay puntos cargados. El resumen se arma solo cuando lleguen los primeros reportes.'];
+  const out = [];
+  out.push(`<b>Estado:</b> de <b>${s.total}</b> ${pl(s.total, 'basural registrado', 'basurales registrados')}, <b>${s.estados.limpio}</b> ${pl(s.estados.limpio, 'está limpio', 'están limpios')} (${fmtPct(s.tasaResolucion)}) y <b>${s.pendientes}</b> ${pl(s.pendientes, 'sigue pendiente', 'siguen pendientes')}: ${s.estados.sin_programar} sin programar y ${s.estados.programado} ${pl(s.estados.programado, 'programado', 'programados')}.`);
+  const ciclo = s.cicloPromedioDias != null
+    ? `cada limpieza tardó en promedio <b>${fmtDays(s.cicloPromedioDias)}</b> desde el reporte${s.ciclosN < 3 ? ` (sobre ${s.ciclosN} ${pl(s.ciclosN, 'caso', 'casos')}: todavía es poco para sacar conclusiones)` : ''}`
+    : 'todavía no se completó ninguna limpieza';
+  const prox = s.proximos[0];
+  out.push(`<b>Capacidad de respuesta:</b> ${ciclo}. ` +
+    (prox ? `${s.proximos.length} ${pl(s.proximos.length, 'limpieza programada', 'limpiezas programadas')}; la próxima: ${esc(prox.lugar)} (${untilText(prox.fecha_programada).toLowerCase()}). ` : 'No hay limpiezas programadas. ') +
+    (s.voluntarios ? `${s.voluntarios} inscripciones de voluntarios (${fmtNum(s.voluntariosPorPunto, 1)} por punto).` : ''));
+  const cuellos = [];
+  if (s.estados.sin_programar) cuellos.push(`${s.estados.sin_programar} de ${s.pendientes} pendientes no ${pl(s.estados.sin_programar, 'tiene', 'tienen')} fecha`);
+  if (s.vencidos) cuellos.push(`${s.vencidos} ${pl(s.vencidos, 'limpieza tiene', 'limpiezas tienen')} la fecha vencida sin cerrarse`);
+  if (s.m3Pendiente) cuellos.push(`quedan ≈ ${fmtNum(s.m3Pendiente, 1)} m³ por retirar (${fmtNum(s.m3PorPendiente, 1)} m³ por punto)${s.necesitanCamion ? `; ${s.necesitanCamion} ${pl(s.necesitanCamion, 'punto necesita', 'puntos necesitan')} camión` : ''}`);
+  if ((s.fotoCobertura ?? 0) < 0.5) cuellos.push(`solo ${fmtPct(s.fotoCobertura)} de los reportes tiene foto, así que casi no hay verificación en campo`);
+  if (cuellos.length) out.push(`<b>Cuellos de botella:</b> ${cuellos.join('; ')}.`);
+  if (s.dengue.length) out.push(`<b>Prioridad sanitaria:</b> ${s.dengue.map(r => esc(r.lugar)).join(', ')} ${pl(s.dengue.length, 'tiene', 'tienen')} recipientes que juntan agua. Conviene ${pl(s.dengue.length, 'limpiarlo', 'limpiarlos')} primero.`);
+  return out;
+}
+
+// ---------- 3) Dibujo ----------
+const COLOR_REP = '#f87171', COLOR_CLN = '#166534'; // claro vs. oscuro: se distinguen también sin ver colores
+
+function weekChartSVG(semanas) {
+  const W = 560, H = 190, L = 30, Rm = 8, T = 10, B = 26, plotH = H - T - B;
+  const maxV = Math.max(1, ...semanas.map(w => Math.max(w.rep, w.cln)));
+  const step = Math.max(1, Math.ceil(maxV / 4)), yMax = step * Math.ceil(maxV / step);
+  const y = (v) => T + plotH * (1 - v / yMax);
+  const slot = (W - L - Rm) / semanas.length, bw = Math.min(16, slot / 3);
+  const label = (w) => w.actual ? 'Esta sem.' : new Date(w.inicio).toLocaleDateString('es-AR', { day: 'numeric', month: 'numeric' });
+  const bg = semanas.map((w, i) => w.actual ? `<rect x="${L + slot * i}" y="${T}" width="${slot}" height="${plotH}" fill="#f1f5f9"/>` : '').join('');
+  let grid = '';
+  for (let v = 0; v <= yMax; v += step) grid += `<line x1="${L}" x2="${W - Rm}" y1="${y(v)}" y2="${y(v)}" stroke="${v ? '#e2e8f0' : '#94a3b8'}" ${v ? 'stroke-dasharray="3 3"' : ''}/><text x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end" font-size="10" fill="#94a3b8">${v}</text>`;
+  const bar = (v, x, c) => v ? `<rect x="${x}" y="${y(v)}" width="${bw}" height="${y(0) - y(v)}" rx="2" fill="${c}"/>` : '';
+  const cols = semanas.map((w, i) => {
+    const cx = L + slot * i + slot / 2;
+    return `${bar(w.rep, cx - bw - 1, COLOR_REP)}${bar(w.cln, cx + 1, COLOR_CLN)}
+      <text x="${cx}" y="${H - 8}" text-anchor="middle" font-size="10" fill="${w.actual ? '#0f172a' : '#64748b'}" ${w.actual ? 'font-weight="600"' : ''}>${label(w)}</text>
+      <rect data-w="${i}" x="${L + slot * i}" y="${T}" width="${slot}" height="${plotH}" fill="transparent" style="cursor:pointer"><title>${label(w)}: ${w.rep} reportados, ${w.cln} limpiados</title></rect>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-auto" role="img" aria-label="Reportados y limpiados por semana, últimas 8 semanas">${bg}${grid}${cols}</svg>`;
+}
+function weekTipHTML(w) {
+  const delta = (v) => v == null ? '' : v === 0 ? ' <span class="text-slate-400">(igual)</span>' : ` <span class="text-slate-400">(${v > 0 ? '+' : ''}${v} vs. sem. ant.)</span>`;
+  const title = w.actual ? 'Esta semana' : `Semana del ${new Date(w.inicio).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })}`;
+  return `<div class="font-semibold mb-1">${title}</div>
+    <div class="flex justify-between gap-3"><span><span class="inline-block w-2 h-2 rounded-sm mr-1" style="background:${COLOR_REP}"></span>Reportados</span><span>${w.rep}${delta(w.deltaRep)}</span></div>
+    <div class="flex justify-between gap-3"><span><span class="inline-block w-2 h-2 rounded-sm mr-1 ring-1 ring-white/60" style="background:${COLOR_CLN}"></span>Limpiados</span><span>${w.cln}${delta(w.deltaCln)}</span></div>
+    <div class="border-t border-white/20 mt-1.5 pt-1.5 text-slate-300">Acumulado: ${w.acumRep} reportados · ${w.acumCln} limpios · ${w.abiertos} abiertos</div>`;
+}
+
 let sumIncludeDemo = null;
 function openSummary() { renderSummary(); openModal('summaryModal'); $('#summaryModal').scrollTop = 0; }
-const fmtNum = (n, d = 0) => n.toLocaleString('es-AR', { maximumFractionDigits: d, minimumFractionDigits: 0 });
-function fmtDays(d) { if (d < 1) return 'menos de 1 día'; const n = Math.round(d); return `${n} ${n === 1 ? 'día' : 'días'}`; }
 
 function renderSummary() {
-  const DAY = 86400000, now = Date.now();
-  const demoN = state.reports.filter(r => r.demo).length, realN = state.reports.length - demoN;
+  const now = Date.now();
+  const all = state.reports.map(toRecord);
+  const demoN = all.filter(r => r.demo).length, realN = all.length - demoN;
   const incl = sumIncludeDemo ?? realN === 0;
-  const R = state.reports.filter(r => incl || !r.demo);
-  const pct = (a, b) => b ? Math.round(a * 100 / b) : 0;
-  const red = R.filter(r => r.status === 'red'), yellow = R.filter(r => r.status === 'yellow'), green = R.filter(r => r.status === 'green');
-  const pending = [...red, ...yellow];
-  const times = green.filter(r => r.cleanedAt).map(r => Math.max(0, (new Date(r.cleanedAt) - new Date(r.reportedAt)) / DAY));
-  const avgDays = times.length ? times.reduce((a, b) => a + b, 0) / times.length : null;
-  const volunteers = R.reduce((n, r) => n + (r.volunteers || 0), 0);
-  const m3Done = green.reduce((n, r) => n + VOLUME[r.size], 0), m3Pending = pending.reduce((n, r) => n + VOLUME[r.size], 0);
-  const today0 = new Date().setHours(0, 0, 0, 0);
-  const upcomingN = yellow.filter(r => new Date(r.scheduledAt) >= today0).length;
-  const overdueN = yellow.filter(r => new Date(r.scheduledAt) < today0).length;
-  const dengue = pending.filter(waterRisk).length;
-  const reopened = R.filter(r => (r.history || []).some(h => /^Reabrió/.test(h.text))).length;
-  const withPhoto = R.filter(r => r.photo).length, afterPhoto = green.filter(r => r.afterPhoto).length;
+  const R = all.filter(r => incl || !r.demo);
+  const s = computeStats(R, now);
+  const mode = !realN ? 'demo' : (incl && demoN ? 'mixto' : 'real');
+  const corte = new Date(now).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' });
 
-  const card = (label, value, sub, tone = 'text-slate-900') => `<div class="bg-white rounded-xl ring-1 ring-slate-200 p-4 avoid-break">
-      <div class="text-xs text-slate-500">${label}</div><div class="text-2xl sm:text-3xl font-bold mt-1 ${tone}">${value}</div>${sub ? `<div class="text-xs text-slate-500 mt-0.5">${sub}</div>` : ''}</div>`;
-  const box = (title, body, extra = '') => `<div class="bg-white rounded-xl ring-1 ring-slate-200 p-4 sm:p-5 avoid-break ${extra}"><div class="font-semibold text-slate-900 mb-3">${title}</div>${body}</div>`;
-  const hbar = (label, n, total, color, note = '') => `<div class="mb-2.5"><div class="flex justify-between text-sm"><span>${label}</span><span class="text-slate-500">${n}${note}</span></div>
-      <div class="h-2.5 rounded-full bg-slate-100 mt-1 overflow-hidden"><div class="h-full rounded-full ${color}" style="width:${total ? Math.max(n ? 3 : 0, n * 100 / total) : 0}%"></div></div></div>`;
+  // --- Componentes ---
+  const box = (title, body, { extra = '', sub = '' } = {}) => `<section class="bg-white rounded-xl ring-1 ring-slate-200 p-4 sm:p-5 avoid-break ${extra}">
+      <div class="flex items-baseline justify-between gap-2 mb-3"><h3 class="font-semibold text-slate-900">${title}</h3>${sub ? `<span class="text-xs text-slate-400">${sub}</span>` : ''}</div>${body}</section>`;
+  const kpi = ({ label, value, sub, tone = 'text-slate-900', chip, chipTone = 'bg-slate-100 text-slate-600' }) => `<div class="bg-white rounded-xl ring-1 ring-slate-200 p-4 avoid-break flex flex-col">
+      <div class="text-xs text-slate-500">${label}</div>
+      <div class="text-2xl sm:text-3xl font-bold mt-1 tabular-nums ${tone}">${value}</div>
+      ${sub ? `<div class="text-xs text-slate-500 mt-0.5">${sub}</div>` : ''}
+      ${chip ? `<div class="mt-auto pt-2"><span class="inline-block text-[11px] font-medium rounded px-1.5 py-0.5 ${chipTone}">${chip}</span></div>` : ''}</div>`;
+  const LEVEL = { ok: 'bg-green-50 text-green-900 ring-green-200', warn: 'bg-amber-50 text-amber-900 ring-amber-200', bad: 'bg-red-50 text-red-900 ring-red-200', none: 'bg-slate-50 text-slate-700 ring-slate-200' };
+  const qual = (label, value, detail, level) => `<div class="rounded-lg ring-1 px-3 py-2.5 ${LEVEL[level]}">
+      <div class="text-[11px] uppercase tracking-wide opacity-75">${label}</div><div class="text-xl font-bold tabular-nums">${value}</div><div class="text-xs opacity-90">${detail}</div></div>`;
+  const empty = (what) => `<div class="rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500">Todavía no hay reportes con ${what}.<div class="text-xs mt-1">Se completa solo a medida que los vecinos carguen puntos.</div></div>`;
+  const dist = (rows, total, color, label, extra) => {
+    if (!total) return null;
+    const p = pctParts(rows.map(x => x.n));
+    return rows.map((x, i) => `<div class="mb-2.5"><div class="flex justify-between gap-2 text-sm"><span>${label(x)}</span>
+        <span class="tabular-nums text-slate-500 whitespace-nowrap"><b class="text-slate-900">${x.n}</b> · ${p[i]}%${extra ? extra(x) : ''}</span></div>
+        <div class="h-2.5 rounded-full bg-slate-100 mt-1 overflow-hidden"><div class="h-full rounded-full ${color}" style="width:${x.n * 100 / total}%"></div></div></div>`).join('');
+  };
+  const estadoChip = (e) => `<span class="inline-flex items-center gap-1.5 text-xs ${ESTADO_UI[e].text}"><span class="w-2 h-2 rounded-full" style="background:${ESTADO_UI[e].color}"></span>${ESTADO_UI[e].label}</span>`;
+  const waiting = (r) => fmtDays((now - r.fecha_reporte) / DAY_MS);
 
-  // Últimas 8 semanas (de lunes a domingo)
-  const mon = new Date(today0); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
-  const weeks = Array.from({ length: 8 }, (_, i) => { const s = mon.getTime() - (7 - i) * 7 * DAY; return { s, e: s + 7 * DAY, rep: 0, cln: 0 }; });
-  R.forEach(r => {
-    const t = new Date(r.reportedAt).getTime(), c = r.cleanedAt && new Date(r.cleanedAt).getTime();
-    weeks.forEach(w => { if (t >= w.s && t < w.e) w.rep++; if (c && c >= w.s && c < w.e) w.cln++; });
-  });
-  const wMax = Math.max(1, ...weeks.map(w => Math.max(w.rep, w.cln)));
-  const bar = (n, color) => `<div class="w-3 sm:w-4 rounded-t ${color}" style="height:${n ? Math.max(4, n * 100 / wMax) : 0}%" title="${n}"></div>`;
-  const weekChart = `<div class="flex items-end gap-1 sm:gap-3 h-36 border-b border-slate-200">${weeks.map(w => `<div class="flex-1 h-full flex items-end justify-center gap-0.5">${bar(w.rep, 'bg-red-500')}${bar(w.cln, 'bg-green-600')}</div>`).join('')}</div>
-    <div class="flex gap-1 sm:gap-3 mt-1">${weeks.map((w, i) => `<div class="flex-1 text-center text-[10px] text-slate-400">${i === 7 ? 'Esta sem.' : new Date(w.s).toLocaleDateString('es-AR', { day: 'numeric', month: 'numeric' })}</div>`).join('')}</div>
-    <div class="flex gap-4 text-xs text-slate-500 mt-3"><span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-red-500"></span>Reportados</span><span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-green-600"></span>Limpiados</span></div>`;
+  // --- Capa 1: contexto y confiabilidad del dato ---
+  const modeBanner = {
+    demo: ['bg-amber-50 ring-amber-200 text-amber-900', 'Modo ejemplo', 'Estos números son de puntos de ejemplo. Cuando se carguen reportes reales, el resumen se recalcula solo con ellos.'],
+    mixto: ['bg-amber-50 ring-amber-200 text-amber-900', 'Datos mezclados', `Incluye ${demoN} puntos de ejemplo junto con ${realN} reales.`],
+    real: ['bg-emerald-50 ring-emerald-200 text-emerald-900', 'Datos reales', `${realN} ${pl(realN, 'reporte cargado', 'reportes cargados')} por vecinos.`],
+  }[mode];
+  const lvlPhoto = s.fotoCobertura == null ? 'none' : s.fotoCobertura >= 0.8 ? 'ok' : s.fotoCobertura >= 0.5 ? 'warn' : 'bad';
+  const lvlNoDate = s.sinFechaRatio == null ? 'none' : s.sinFechaRatio <= 0.25 ? 'ok' : s.sinFechaRatio <= 0.5 ? 'warn' : 'bad';
+  const quality = `<div class="grid grid-cols-2 lg:grid-cols-4 gap-2 print-cols-4">
+      ${qual('Evidencia fotográfica', fmtPct(s.fotoCobertura), `${s.conFoto} de ${s.total} reportes con foto`, lvlPhoto)}
+      ${qual('Pendientes sin fecha', `${s.estados.sin_programar} de ${s.pendientes}`, s.pendientes ? `${fmtPct(s.sinFechaRatio)} de los pendientes` : 'no hay pendientes', lvlNoDate)}
+      ${qual('Fechas vencidas', s.vencidos, s.vencidos ? 'programados sin cerrar' : 'ninguna programación atrasada', s.vencidos ? 'bad' : 'ok')}
+      ${qual('Cierre verificado', s.estados.limpio ? `${s.fotoDespues} de ${s.estados.limpio}` : '—', s.estados.limpio ? 'limpiezas con foto del después' : 'todavía no hay limpiezas', !s.estados.limpio ? 'none' : s.fotoDespues === s.estados.limpio ? 'ok' : 'warn')}
+    </div>`;
 
-  const byType = TYPES.map(t => { const all = R.filter(r => r.type === t); return { t, n: all.length, done: all.filter(r => r.status === 'green').length }; }).sort((a, b) => b.n - a.n);
-  const bySize = Object.keys(SIZES).map(s => ({ s, n: R.filter(r => r.size === s).length }));
-  const oldest = pending.slice().sort((a, b) => new Date(a.reportedAt) - new Date(b.reportedAt)).slice(0, 6);
+  // --- Capa 3: KPIs ---
+  const thisW = s.semanas[7], prevW = s.semanas[6];
+  const d = thisW.rep - prevW.rep;
+  const kpis = `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 print-cols-4">
+      ${kpi({ label: 'Basurales registrados', value: s.total, sub: `${thisW.rep} nuevos esta semana`, chip: d === 0 ? 'igual que la semana pasada' : `${d > 0 ? '+' : ''}${d} vs. semana pasada` })}
+      ${kpi({ label: 'Tasa de resolución', value: fmtPct(s.tasaResolucion), tone: 'text-green-700', sub: `${s.estados.limpio} de ${s.total} recuperados` })}
+      ${kpi({ label: 'Ciclo promedio de limpieza', value: s.cicloPromedioDias != null ? fmtDays(s.cicloPromedioDias) : '—', sub: s.cicloPromedioDias != null ? 'del reporte a limpio' : 'todavía no hay limpiezas',
+             chip: s.ciclosN && s.ciclosN < 3 ? `muestra chica: ${s.ciclosN} ${pl(s.ciclosN, 'caso', 'casos')}` : '', chipTone: 'bg-amber-100 text-amber-900' })}
+      ${kpi({ label: 'Voluntarios inscriptos', value: s.voluntarios, tone: 'text-emerald-700', sub: `${fmtNum(s.voluntariosPorPunto, 1)} por punto en promedio` })}
+      ${kpi({ label: 'Pendientes', value: s.pendientes, tone: 'text-red-700', sub: `${s.estados.sin_programar} sin programar · ${s.estados.programado} ${pl(s.estados.programado, 'programado', 'programados')}`,
+             chip: s.vencidos ? `${s.vencidos} con fecha vencida` : '', chipTone: 'bg-red-100 text-red-800' })}
+      ${kpi({ label: 'Por retirar (estimado)', value: `${fmtNum(s.m3Pendiente, 1)} m³`, sub: s.pendientes ? `≈ ${fmtNum(s.m3PorPendiente, 1)} m³ por punto pendiente` : 'nada pendiente',
+             chip: s.necesitanCamion ? `${s.necesitanCamion} ${pl(s.necesitanCamion, 'necesita', 'necesitan')} camión` : '' })}
+      ${kpi({ label: 'Retirado (estimado)', value: `${fmtNum(s.m3Retirado, 1)} m³`, sub: s.estados.limpio ? `≈ ${fmtNum(s.m3PorLimpio, 1)} m³ por punto limpio` : 'todavía no hay limpiezas' })}
+      ${kpi({ label: 'Riesgo de dengue', value: s.dengue.length, tone: s.dengue.length ? 'text-red-700' : 'text-slate-900',
+             sub: s.pendientes ? `${fmtPct(ratio(s.dengue.length, s.pendientes))} de los pendientes` : 'sin pendientes',
+             chip: s.dengue.length ? 'prioridad de intervención' : '', chipTone: 'bg-red-100 text-red-800' })}
+    </div>`;
 
-  const dateStr = new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' });
-  const summaryText = R.length
-    ? `En San Roque se registraron <b>${R.length} basurales</b>. <b>${green.length} ya se limpiaron</b> (${pct(green.length, R.length)}%)${volunteers ? `, con <b>${volunteers} vecinos</b> anotados para ayudar` : ''}${avgDays != null ? `, y cada punto tardó en promedio <b>${fmtDays(avgDays)}</b> desde que se reportó hasta quedar limpio` : ''}. Se retiraron unos <b>${fmtNum(m3Done, 1)} m³</b> de residuos. Quedan <b>${pending.length} pendientes</b>${upcomingN ? `, ${upcomingN} de ellos con limpieza programada` : ''}.`
-    : 'Todavía no hay puntos cargados.';
+  // --- Prioridad sanitaria ---
+  const dengueBox = s.dengue.length ? `<section class="rounded-xl ring-2 ring-red-300 bg-red-50 p-4 sm:p-5 avoid-break">
+      <div class="flex items-start gap-3">
+        <div class="w-9 h-9 rounded-lg bg-red-600 text-white flex items-center justify-center shrink-0">${icon('alert', 'w-5 h-5')}</div>
+        <div class="flex-1 min-w-0">
+          <h3 class="font-semibold text-red-900">Prioridad sanitaria: ${s.dengue.length} ${pl(s.dengue.length, 'punto con', 'puntos con')} recipientes que juntan agua</h3>
+          <p class="text-sm text-red-800 mt-0.5">Posible criadero del mosquito del dengue (<i>Aedes aegypti</i>). Conviene intervenir primero aquí.</p>
+          <div class="mt-3 divide-y divide-red-200/70">${s.dengue.map(r => `<button data-sid="${r.id}" class="w-full flex items-center justify-between gap-3 py-2 text-left text-sm hover:bg-red-100/60 rounded px-1">
+              <span class="min-w-0"><span class="font-medium text-red-950">${esc(r.lugar)}</span> <span class="text-red-700">· ${esc(r.tipo_residuo || '')} ${r.tamano ? '· ' + esc(r.tamano) : ''}</span></span>
+              <span class="shrink-0 flex items-center gap-3">${estadoChip(r.estado)}<span class="text-red-900 font-medium whitespace-nowrap">hace ${waiting(r)}</span></span></button>`).join('')}</div>
+        </div></div></section>` : '';
 
+  // --- Estado de los puntos (barra apilada) ---
+  const stacked = `<div class="flex h-8 rounded-md overflow-hidden ring-1 ring-slate-200" role="img" aria-label="${ESTADO_ORDEN.map(k => `${ESTADO_UI[k].label} ${s.pctEstado[k]}%`).join(', ')}">
+      ${ESTADO_ORDEN.map(k => { const n = s.estados[k]; if (!n) return ''; const w = n * 100 / s.total;
+        return `<div class="h-full flex items-center justify-center text-xs font-semibold" style="width:${w}%;background:${ESTADO_UI[k].color};color:${ESTADO_UI[k].ink}" title="${ESTADO_UI[k].label}: ${n} (${s.pctEstado[k]}%)">${w >= 12 ? s.pctEstado[k] + '%' : ''}</div>`; }).join('')}</div>
+    <table class="w-full text-sm mt-3"><tbody>
+      ${ESTADO_ORDEN.map(k => `<tr class="border-b border-slate-100 last:border-0">
+        <td class="py-1.5"><span class="inline-block w-3 h-3 rounded-sm align-[-1px] mr-2" style="background:${ESTADO_UI[k].color}"></span><span class="font-medium">${ESTADO_UI[k].label}</span> <span class="text-xs text-slate-400">${ESTADO_UI[k].hint}</span></td>
+        <td class="py-1.5 text-right tabular-nums font-semibold w-10">${s.estados[k]}</td>
+        <td class="py-1.5 text-right tabular-nums text-slate-500 w-14">${s.pctEstado[k]}%</td></tr>`).join('')}
+      <tr class="text-xs text-slate-500"><td class="pt-2">Pendientes = sin programar + programado</td><td class="pt-2 text-right tabular-nums font-semibold text-slate-700">${s.pendientes}</td><td class="pt-2 text-right tabular-nums">${s.pctEstado.sin_programar + s.pctEstado.programado}%</td></tr>
+      <tr class="text-xs text-slate-500"><td>Total registrados</td><td class="text-right tabular-nums font-semibold text-slate-700">${s.total}</td><td class="text-right tabular-nums">100%</td></tr>
+    </tbody></table>
+    ${s.reabiertos ? `<div class="text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100">${s.reabiertos} ${pl(s.reabiertos, 'lugar se volvió', 'lugares se volvieron')} a ensuciar después de limpiarse.</div>` : ''}`;
+
+  // --- Actividad semanal ---
+  const wRep = sumBy(s.semanas, w => w.rep), wCln = sumBy(s.semanas, w => w.cln);
+  const activity = `<div id="chartWrap" class="relative">${weekChartSVG(s.semanas)}
+      <div id="chartTip" class="hidden absolute top-0 z-10 pointer-events-none bg-slate-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg w-60"></div></div>
+    <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 mt-2">
+      <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm" style="background:${COLOR_REP}"></span>Reportados</span>
+      <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm" style="background:${COLOR_CLN}"></span>Limpiados</span>
+      <span class="ml-auto">8 semanas: ${wRep} reportados · ${wCln} limpiados · ${thisW.abiertos} abiertos hoy</span></div>
+    <div class="text-[11px] text-slate-400 mt-1 no-print">Tocá o pasá el mouse sobre una semana para ver el detalle.</div>`;
+
+  // --- Distribuciones ---
+  const typeBody = dist(s.tipos, s.tiposN, 'bg-emerald-600', x => x.clave, x => ` · ${x.limpios} ${pl(x.limpios, 'limpio', 'limpios')}`);
+  const sizeBody = dist(s.tamanos, s.tamanosN, 'bg-slate-500',
+    x => `${x.clave} <span class="text-slate-400 text-xs">(${SIZES[x.clave].toLowerCase()} · ≈ ${fmtNum(x.m3, 1)} m³ c/u)</span>`,
+    x => ` · ${fmtNum(x.n * x.m3, 1)} m³`);
+
+  // --- Pendientes más antiguos ---
+  const oldest = s.masAntiguos.length ? box('Pendientes que llevan más tiempo', `<div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead><tr class="text-left text-xs text-slate-500 border-b border-slate-200"><th class="py-2 pr-3 font-medium">Lugar</th><th class="py-2 pr-3 font-medium">Tipo · tamaño</th><th class="py-2 pr-3 font-medium">Estado</th><th class="py-2 pr-3 font-medium text-right">m³ est.</th><th class="py-2 font-medium text-right">Esperando</th></tr></thead>
+      <tbody>${s.masAntiguos.map(r => `<tr data-sid="${r.id}" class="border-b border-slate-100 last:border-0 cursor-pointer hover:bg-slate-50">
+        <td class="py-2 pr-3">${esc(r.lugar)}${r.riesgo_dengue ? ` <span class="text-red-600" title="Recipientes con agua (dengue)">${icon('alert')}</span>` : ''}</td>
+        <td class="py-2 pr-3 text-slate-600">${esc(r.tipo_residuo || '—')} · ${esc(r.tamano || '—')}</td>
+        <td class="py-2 pr-3">${estadoChip(r.estado)}</td>
+        <td class="py-2 pr-3 text-right tabular-nums">${fmtNum(r.volumen_m3, 1)}</td>
+        <td class="py-2 text-right font-medium whitespace-nowrap">${waiting(r)}</td></tr>`).join('')}</tbody></table></div>`) : '';
+
+  const upd = s.ultimaActualizacion ? fmtDateTime(s.ultimaActualizacion) : '—';
   $('#summaryContent').innerHTML = `
-    <div class="flex items-start justify-between gap-3 mb-4">
+    <header class="flex items-start justify-between gap-3 mb-4">
       <div class="flex items-center gap-3">
         <div class="w-11 h-11 rounded-xl bg-emerald-700 text-white flex items-center justify-center shrink-0">${icon('leaf', 'w-6 h-6')}</div>
-        <div><div class="text-xl sm:text-2xl font-bold">Mapa Limpio · Resumen</div>
-        <div class="text-sm text-slate-500">San Roque, Corrientes · Datos al ${dateStr}</div></div>
+        <div><h2 class="text-xl sm:text-2xl font-bold">Mapa Limpio · Resumen</h2>
+        <div class="text-sm text-slate-500">San Roque, Corrientes · Corte al ${corte}</div></div>
       </div>
       <div class="flex gap-2 no-print shrink-0">
         <button id="sumPrint" class="hidden sm:inline-flex items-center gap-1.5 rounded-lg bg-white ring-1 ring-slate-300 px-3 py-2 text-sm font-medium">${icon('print')} Imprimir / PDF</button>
         <button id="sumClose" class="rounded-lg bg-white ring-1 ring-slate-300 p-2" title="Cerrar">${icon('x', 'w-5 h-5')}</button>
       </div>
+    </header>
+
+    <!-- Capa 1: contexto y confiabilidad -->
+    <div class="rounded-xl ring-1 ${modeBanner[0]} px-4 py-3 mb-3 avoid-break">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        <span class="font-semibold">${modeBanner[1]}</span><span>${modeBanner[2]}</span>
+        <span class="sm:ml-auto text-xs opacity-80">Última actividad registrada: ${upd}</span>
+      </div>
+      ${demoN && realN ? `<label class="no-print flex items-center gap-2 text-sm mt-2"><input type="checkbox" id="sumDemo" ${incl ? 'checked' : ''} class="w-4 h-4"> Incluir los ${demoN} puntos de ejemplo</label>` : ''}
     </div>
-    ${demoN && realN ? `<label class="no-print flex items-center gap-2 text-sm text-slate-600 mb-3"><input type="checkbox" id="sumDemo" ${incl ? 'checked' : ''} class="w-4 h-4"> Incluir los ${demoN} puntos de ejemplo</label>` : ''}
-    ${incl && demoN ? `<div class="rounded-lg bg-amber-50 ring-1 ring-amber-200 text-amber-900 text-sm px-4 py-2.5 mb-4">${realN ? 'Estos números incluyen puntos de ejemplo.' : 'Estos números son de los puntos de ejemplo. Cuando se carguen reportes reales, el resumen se arma solo con ellos.'}</div>` : ''}
+    ${s.total ? `<div class="mb-4"><div class="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Calidad del dato</div>${quality}</div>` : ''}
 
-    <div class="bg-emerald-800 text-white rounded-xl p-4 sm:p-5 mb-4 avoid-break">
-      <div class="text-xs uppercase tracking-wide text-emerald-200 mb-1">En pocas palabras</div>
-      <p class="text-[15px] sm:text-base leading-relaxed">${summaryText}</p>
+    <!-- Capa 2: resumen ejecutivo -->
+    <section class="bg-emerald-800 text-white rounded-xl p-4 sm:p-5 mb-4 avoid-break">
+      <div class="text-xs uppercase tracking-wide text-emerald-200 mb-2">En pocas palabras</div>
+      <ul class="space-y-1.5 text-[15px] leading-relaxed">${executiveSummary(s).map(t => `<li>${t}</li>`).join('')}</ul>
+    </section>
+
+    ${s.total ? `
+    ${dengueBox ? `<div class="mb-4">${dengueBox}</div>` : ''}
+
+    <!-- Capa 3: KPIs y detalle -->
+    <div class="mb-4">${kpis}</div>
+    <div class="grid lg:grid-cols-2 gap-3 mb-3 print-cols-2">
+      ${box('Estado de los puntos', stacked, { sub: `${s.total} en total` })}
+      ${box('Actividad de las últimas 8 semanas', activity)}
     </div>
-
-    ${R.length ? `
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-      ${card('Basurales registrados', R.length, `${withPhoto} con foto`)}
-      ${card('Espacios recuperados', green.length, `${pct(green.length, R.length)}% del total${afterPhoto ? ` · ${afterPhoto} con foto del después` : ''}`, 'text-green-700')}
-      ${card('Tiempo promedio hasta limpiar', avgDays != null ? fmtDays(avgDays) : '—', avgDays != null ? 'desde el reporte' : 'todavía no hay limpiezas')}
-      ${card('Vecinos anotados', volunteers, 'suma de voluntarios en todos los puntos', 'text-emerald-700')}
-      ${card('Residuos retirados', `${fmtNum(m3Done, 1)} m³`, 'estimado según el tamaño')}
-      ${card('Pendientes', pending.length, `${red.length} sin fecha · ${upcomingN} programados${overdueN ? ` · ${overdueN} con fecha vencida` : ''}`, 'text-red-700')}
-      ${card('Por retirar', `${fmtNum(m3Pending, 1)} m³`, 'estimado en puntos pendientes')}
-      ${card('Riesgo de dengue', dengue, 'pendientes con recipientes que juntan agua', dengue ? 'text-amber-700' : 'text-slate-900')}
+    <div class="grid lg:grid-cols-2 gap-3 mb-3 print-cols-2">
+      ${box('Qué tipo de residuo hay', (typeBody || empty('tipo de residuo')) + (typeBody ? '<div class="text-xs text-slate-400 mt-2">Poda y escombros suelen necesitar camión; los domiciliarios suelen indicar falta de recolección.</div>' : ''), { sub: s.tiposN ? `${s.tiposN} clasificados` : '' })}
+      ${box('Tamaño de los basurales', sizeBody || empty('tamaño indicado'), { sub: s.tamanosN ? `${s.tamanosN} clasificados` : '' })}
     </div>
+    ${oldest ? `<div class="mb-3">${oldest}</div>` : ''}` : ''}
 
-    <div class="grid lg:grid-cols-2 gap-3 mb-3">
-      ${box('Estado de los puntos', `
-        <div class="flex h-4 rounded-full overflow-hidden bg-slate-100 mb-3">
-          <div class="bg-red-600" style="width:${pct(red.length, R.length)}%"></div><div class="bg-amber-500" style="width:${pct(yellow.length, R.length)}%"></div><div class="bg-green-600" style="width:${100 - pct(red.length, R.length) - pct(yellow.length, R.length)}%"></div></div>
-        <div class="grid grid-cols-3 text-center text-sm">
-          <div><div class="text-xl font-bold text-red-700">${red.length}</div><div class="text-xs text-slate-500">Reportados</div></div>
-          <div><div class="text-xl font-bold text-amber-700">${yellow.length}</div><div class="text-xs text-slate-500">Programados</div></div>
-          <div><div class="text-xl font-bold text-green-700">${green.length}</div><div class="text-xs text-slate-500">Limpios</div></div></div>
-        ${reopened ? `<div class="text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100">${reopened} ${reopened === 1 ? 'lugar se volvió' : 'lugares se volvieron'} a ensuciar después de limpiarse.</div>` : ''}`)}
-      ${box('Actividad de las últimas 8 semanas', weekChart)}
-    </div>
+    <footer class="text-xs text-slate-500 leading-relaxed mt-4 mb-8 border-t border-slate-200 pt-3 avoid-break">
+      <div class="font-medium text-slate-600 mb-1">Metodología</div>
+      <ul class="list-disc pl-4 space-y-0.5">
+        <li><b>Estados:</b> sin programar (reportado, sin fecha), programado (con fecha de limpieza) y limpio. Pendientes = sin programar + programado.</li>
+        <li><b>Volumen:</b> estimado por categoría de tamaño, no medido: chico ≈ ${fmtNum(VOLUME.Chico, 1)} m³ (unas bolsas), mediano ≈ ${VOLUME.Mediano} m³ (una camioneta), grande ≈ ${VOLUME.Grande} m³ (hace falta camión).</li>
+        <li><b>Ciclo de limpieza:</b> días entre la fecha del reporte y la fecha en que se marcó limpio. Con menos de 3 casos el promedio es solo orientativo.</li>
+        <li><b>Voluntarios:</b> suma de inscripciones en cada punto; una misma persona puede estar anotada en varios.</li>
+        <li><b>Riesgo de dengue:</b> se detecta por palabras de la descripción (cubiertas, agua, baldes, botellas…). Es una alerta orientativa, no una inspección sanitaria.</li>
+        <li><b>Semanas:</b> de lunes a domingo. Porcentajes redondeados para que sumen 100%.</li>
+      </ul>
+    </footer>`;
 
-    <div class="grid lg:grid-cols-2 gap-3 mb-3">
-      ${box('Qué tipo de residuo hay', byType.map(x => hbar(x.t, x.n, R.length, 'bg-emerald-600', x.n ? ` · ${x.done} limpios` : '')).join('') + '<div class="text-xs text-slate-400 mt-2">Ayuda a planificar: poda y escombros necesitan camión; los domiciliarios suelen indicar falta de recolección.</div>')}
-      ${box('Tamaño de los basurales', bySize.map(x => hbar(`${x.s} <span class="text-slate-400 text-xs">(${SIZES[x.s].toLowerCase()})</span>`, x.n, R.length, 'bg-slate-500')).join(''))}
-    </div>
-
-    ${oldest.length ? box('Pendientes que llevan más tiempo', `<div class="overflow-x-auto"><table class="w-full text-sm">
-        <thead><tr class="text-left text-xs text-slate-500 border-b border-slate-200"><th class="py-2 pr-3 font-medium">Lugar</th><th class="py-2 pr-3 font-medium">Tipo</th><th class="py-2 pr-3 font-medium">Estado</th><th class="py-2 font-medium text-right">Esperando</th></tr></thead>
-        <tbody>${oldest.map(r => `<tr data-sid="${r.id}" class="border-b border-slate-100 last:border-0 cursor-pointer hover:bg-slate-50">
-          <td class="py-2 pr-3">${esc(r.address)}${waterRisk(r) ? ` <span class="text-amber-600" title="Recipientes con agua">${icon('alert')}</span>` : ''}</td>
-          <td class="py-2 pr-3 text-slate-600">${esc(r.type)} · ${esc(r.size)}</td>
-          <td class="py-2 pr-3"><span class="inline-flex items-center gap-1.5 text-xs ${STATUS[r.status].text}"><span class="w-2 h-2 rounded-full ${STATUS[r.status].dot}"></span>${STATUS[r.status].label}</span></td>
-          <td class="py-2 text-right font-medium whitespace-nowrap">${fmtDays((now - new Date(r.reportedAt)) / DAY)}</td></tr>`).join('')}</tbody></table></div>`, 'mb-3') : ''}
-    ` : ''}
-
-    <div class="text-xs text-slate-400 leading-relaxed mt-4 mb-8">
-      Datos cargados por vecinos en Mapa Limpio. Los volúmenes son estimaciones (chico ≈ ${VOLUME.Chico} m³, mediano ≈ ${VOLUME.Mediano} m³, grande ≈ ${VOLUME.Grande} m³).
-      "Vecinos anotados" suma los voluntarios de cada punto: una misma persona puede estar anotada en varios. Versión de prueba.
-    </div>`;
-
+  // --- Interacción ---
   $('#sumClose').onclick = () => closeModal('summaryModal');
   $('#sumPrint').onclick = () => window.print();
   const dc = $('#sumDemo'); if (dc) dc.onchange = () => { sumIncludeDemo = dc.checked; renderSummary(); };
-  $('#summaryContent').querySelectorAll('[data-sid]').forEach(tr => tr.onclick = () => { closeModal('summaryModal'); openDetail(+tr.dataset.sid); });
+  $('#summaryContent').querySelectorAll('[data-sid]').forEach(el => el.onclick = () => { closeModal('summaryModal'); openDetail(+el.dataset.sid); });
+  const wrap = $('#chartWrap'), tip = $('#chartTip');
+  if (wrap) {
+    let pinned = null;
+    const show = (el) => {
+      tip.innerHTML = weekTipHTML(s.semanas[+el.dataset.w]); tip.classList.remove('hidden');
+      const b = el.getBoundingClientRect(), wb = wrap.getBoundingClientRect(), tw = tip.offsetWidth;
+      tip.style.left = Math.max(0, Math.min(wb.width - tw, b.left - wb.left + b.width / 2 - tw / 2)) + 'px';
+    };
+    wrap.querySelectorAll('[data-w]').forEach(el => {
+      el.addEventListener('mouseenter', () => { if (pinned == null) show(el); });
+      el.addEventListener('mouseleave', () => { if (pinned == null) tip.classList.add('hidden'); });
+      el.addEventListener('click', (e) => { e.stopPropagation(); if (pinned === el.dataset.w) { pinned = null; tip.classList.add('hidden'); } else { pinned = el.dataset.w; show(el); } });
+    });
+    $('#summaryContent').onclick = () => { pinned = null; tip.classList.add('hidden'); }; // tocar afuera cierra el detalle
+  }
 }
+
+// ================= Modo Municipalidad (demo) =================
+// El vecino reclama desde el link; el encargado de limpieza ve la bandeja ordenada por prioridad,
+// arma el recorrido del día y la cuadrilla lo marca como hecho con foto. En la demo todo queda en
+// este navegador; en la versión real (Etapa C) los datos viajan por el servidor.
+const DEPOT = { name: 'Municipalidad (salida)', ll: TOWN.center };
+const CREW = 'Cuadrilla municipal';
+let adminTab = 'bandeja';
+let adminIn = sessionStorage.getItem('mapaLimpio.admin') === '1';
+const todayIds = () => (state.today ||= []);
+const claimNo = (r) => '#' + String(r.id).padStart(4, '0');
+const isToday = (iso) => iso && new Date(iso).toDateString() === new Date().toDateString();
+const gmapsTo = (r) => `https://www.google.com/maps/dir/?api=1&destination=${r.lat.toFixed(6)},${r.lng.toFixed(6)}&travelmode=driving`;
+function logAs(r, by, text) { r.touched = true; (r.history ||= []).push({ at: new Date().toISOString(), by, text }); }
+
+/** Prioridad 0-100 y los motivos, para que el encargado entienda por qué va primero. */
+function priority(r) {
+  const days = (Date.now() - new Date(r.reportedAt)) / DAY_MS, why = [];
+  let p = 0;
+  if (waterRisk(r)) { p += 40; why.push(['Riesgo dengue', 'bg-red-100 text-red-800']); }
+  p += { Grande: 25, Mediano: 12, Chico: 4 }[r.size] || 0;
+  if (r.size === 'Grande') why.push(['Necesita camión', 'bg-slate-200 text-slate-800']);
+  p += Math.min(30, Math.round(days * 2));
+  if (days >= 5) why.push([`${Math.floor(days)} días esperando`, 'bg-amber-100 text-amber-900']);
+  p += Math.min(15, r.volunteers || 0);
+  if ((r.volunteers || 0) >= 5) why.push([`${r.volunteers} vecinos lo piden`, 'bg-emerald-100 text-emerald-800']);
+  const score = Math.min(100, p);
+  return { score, why, level: score >= 60 ? ['Alta', 'bg-red-600 text-white'] : score >= 35 ? ['Media', 'bg-amber-500 text-amber-950'] : ['Baja', 'bg-slate-300 text-slate-800'] };
+}
+
+/** Recorrido del día: vecino más cercano desde la Municipalidad, ida y vuelta. */
+function planRoute() {
+  const left = todayIds().map(id => state.reports.find(r => r.id === id)).filter(r => r && r.status !== 'green');
+  const order = []; let cur = L.latLng(DEPOT.ll), m = 0;
+  while (left.length) {
+    let bi = 0, bd = Infinity;
+    left.forEach((r, i) => { const d = cur.distanceTo([r.lat, r.lng]); if (d < bd) { bd = d; bi = i; } });
+    const r = left.splice(bi, 1)[0]; m += bd; order.push(r); cur = L.latLng(r.lat, r.lng);
+  }
+  if (order.length) m += cur.distanceTo(DEPOT.ll);
+  const km = m * 1.3 / 1000;                       // 1,3: las calles no van en línea recta
+  const min = Math.round(km / 20 * 60 + order.length * 25); // 20 km/h en el pueblo + 25 min de carga por parada
+  return { order, km, min, m3: order.reduce((n, r) => n + (VOLUME[r.size] || 0), 0) };
+}
+function gmapsRoute(order) {
+  const p = (ll) => `${ll[0].toFixed(6)},${ll[1].toFixed(6)}`, o = p(DEPOT.ll);
+  const wp = order.slice(0, 9).map(r => p([r.lat, r.lng])).join('%7C'); // Google Maps acepta hasta 9 paradas intermedias
+  return `https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${o}&waypoints=${wp}&travelmode=driving`;
+}
+const fmtMin = (m) => m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+
+function addToday(r) {
+  if (todayIds().includes(r.id)) return;
+  r.prevSched = { status: r.status, scheduledAt: r.scheduledAt, meetNote: r.meetNote };
+  const d = new Date(); d.setHours(8, 0, 0, 0);
+  Object.assign(r, { status: 'yellow', scheduledAt: d.toISOString(), meetNote: 'Retiro con el camión municipal.' });
+  todayIds().push(r.id);
+  logAs(r, 'Municipalidad', 'Programó el retiro municipal para hoy');
+  save(); renderMarkers(); renderPanel();
+  toast(`${claimNo(r)} agregado al recorrido de hoy`);
+}
+function removeToday(r) {
+  state.today = todayIds().filter(id => id !== r.id);
+  if (r.prevSched) { Object.assign(r, r.prevSched); delete r.prevSched; }
+  logAs(r, 'Municipalidad', 'Quitó el retiro de hoy');
+  save(); renderMarkers(); renderPanel();
+}
+function crewDone(r, photo) {
+  Object.assign(r, { status: 'green', cleanedAt: new Date().toISOString(), afterPhoto: photo, cleanedBy: CREW, cleanNote: 'Retirado por el camión municipal.' });
+  delete r.prevSched;
+  state.today = todayIds().filter(id => id !== r.id);
+  logAs(r, CREW, photo ? 'Marcó el lugar como limpio y subió la foto del después' : 'Marcó el lugar como limpio (sin foto)');
+  save(); renderMarkers(); renderPanel();
+  toast(`${claimNo(r)} resuelto. Al vecino le llega el aviso.`);
+}
+
+// Recorrido dibujado en el mapa
+let routeLayer = null;
+function showRouteOnMap() {
+  const { order, km } = planRoute(); if (!order.length) return toast('No hay retiros cargados para hoy');
+  clearRoute(true);
+  const pts = [DEPOT.ll, ...order.map(r => [r.lat, r.lng]), DEPOT.ll];
+  const num = (html, cls, s) => L.divIcon({ className: '', iconSize: [s, s], iconAnchor: [s / 2, s / 2], html: `<div class="route-num ${cls}">${html}</div>` });
+  routeLayer = L.layerGroup([
+    L.polyline(pts, { color: '#1d4ed8', weight: 4, opacity: .85, dashArray: '8 6' }),
+    L.marker(DEPOT.ll, { icon: num('M', 'depot', 30), zIndexOffset: 2000 }).bindTooltip(DEPOT.name),
+    ...order.map((r, i) => L.marker([r.lat, r.lng], { icon: num(i + 1, '', 26), zIndexOffset: 2000 }).bindTooltip(`${i + 1}. ${esc(r.address)}`).on('click', () => openDetail(r.id))),
+  ]).addTo(map);
+  $('#routeChipText').textContent = `Recorrido de hoy · ${order.length} paradas · ≈ ${fmtNum(km, 1)} km`;
+  $('#routeChip').classList.remove('hidden');
+  closeModal('adminModal');
+  map.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [40, 110], paddingBottomRight: [60, isMobile() ? $('#panel').offsetHeight + 30 : 40] });
+}
+function clearRoute(silent) { if (routeLayer) map.removeLayer(routeLayer); routeLayer = null; $('#routeChip').classList.add('hidden'); if (!silent) toast('Recorrido quitado del mapa'); }
+$('#routeClear').onclick = () => clearRoute();
+$('#routeBack').onclick = () => openAdmin('hoy');
+
+function openAdmin(tab) { if (tab) adminTab = tab; renderAdmin(); openModal('adminModal'); $('#adminModal').scrollTop = 0; }
+
+function renderAdmin() {
+  const head = `<header class="flex items-start justify-between gap-3 mb-4">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-xl bg-blue-700 text-white flex items-center justify-center shrink-0">${icon('building', 'w-6 h-6')}</div>
+        <div><h2 class="text-xl sm:text-2xl font-bold">Panel de limpieza</h2>
+        <div class="text-sm text-slate-500">Municipalidad de San Roque <span class="ml-1 text-[11px] font-semibold uppercase bg-amber-100 text-amber-900 rounded px-1.5 py-0.5">Demo</span></div></div>
+      </div>
+      <div class="flex gap-2 shrink-0">
+        ${adminIn ? `<button data-adm="logout" class="hidden sm:inline-flex rounded-lg bg-white ring-1 ring-slate-300 px-3 py-2 text-sm">Salir</button>` : ''}
+        <button data-adm="close" class="rounded-lg bg-white ring-1 ring-slate-300 p-2" title="Cerrar">${icon('x', 'w-5 h-5')}</button>
+      </div></header>`;
+
+  if (!adminIn) {
+    $('#adminContent').innerHTML = head + `<div class="max-w-md mx-auto bg-white rounded-2xl ring-1 ring-slate-200 p-6 mt-6 text-center">
+        <div class="w-14 h-14 mx-auto rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center">${icon('building', 'w-8 h-8')}</div>
+        <h3 class="text-lg font-semibold mt-3">Acceso para empleados municipales</h3>
+        <p class="text-sm text-slate-500 mt-1">Acá el encargado de limpieza ve los reclamos de los vecinos, arma el recorrido del día y la cuadrilla los marca como resueltos.</p>
+        <div class="text-left space-y-2 mt-5">
+          <input disabled value="encargado.limpieza" class="w-full rounded-lg ring-1 ring-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-500">
+          <input disabled type="password" value="demo1234" class="w-full rounded-lg ring-1 ring-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-500">
+        </div>
+        <button data-adm="login" class="w-full mt-3 rounded-lg bg-blue-700 hover:bg-blue-800 text-white py-3 font-semibold">Entrar como encargado (demo)</button>
+        <p class="text-xs text-slate-400 mt-3">En la versión real cada empleado entra con su propio usuario y solo ve lo que le corresponde.</p>
+      </div>`;
+    return;
+  }
+
+  // Limpiar la lista de hoy (puede haber puntos que ya se limpiaron por otro lado)
+  state.today = todayIds().filter(id => state.reports.some(r => r.id === id && r.status !== 'green'));
+  const pend = state.reports.filter(r => r.status !== 'green');
+  const inbox = pend.filter(r => !todayIds().includes(r.id)).map(r => ({ r, p: priority(r) })).sort((a, b) => b.p.score - a.p.score);
+  const plan = planRoute();
+  const doneToday = state.reports.filter(r => r.status === 'green' && r.cleanedBy === CREW && isToday(r.cleanedAt));
+  const week = state.reports.filter(r => r.status === 'green' && r.cleanedAt && Date.now() - new Date(r.cleanedAt) < 7 * DAY_MS).length;
+
+  const stat = (label, n, cls) => `<div class="bg-white rounded-xl ring-1 ring-slate-200 px-4 py-3"><div class="text-xs text-slate-500">${label}</div><div class="text-2xl font-bold tabular-nums ${cls}">${n}</div></div>`;
+  const tabBtn = (k, label, ic, n) => `<button data-adm="tab" data-k="${k}" class="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium ${adminTab === k ? 'bg-slate-900 text-white' : 'bg-white ring-1 ring-slate-200 text-slate-600'}">${icon(ic, 'w-4 h-4')} ${label}${n != null ? ` <span class="text-xs rounded-full px-1.5 ${adminTab === k ? 'bg-white/20' : 'bg-slate-100'}">${n}</span>` : ''}</button>`;
+  const thumb = (r) => `<img src="${photoOf(r)}" class="w-16 h-16 sm:w-20 sm:h-20 rounded-lg object-cover bg-slate-200 shrink-0" alt="">`;
+
+  let body = '';
+  if (adminTab === 'bandeja') {
+    body = inbox.length ? `<div class="space-y-2">${inbox.map(({ r, p }) => `<div class="bg-white rounded-xl ring-1 ring-slate-200 p-3 flex gap-3">
+        ${thumb(r)}
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-xs font-mono text-slate-400">${claimNo(r)}</span>
+            <span class="text-[11px] font-semibold rounded px-1.5 py-0.5 ${p.level[1]}">Prioridad ${p.level[0]} · ${p.score}</span>
+            <span class="text-xs ${STATUS[r.status].text}">${STATUS[r.status].label}</span>
+          </div>
+          <div class="font-semibold mt-0.5 truncate">${esc(r.address)}</div>
+          <div class="text-xs text-slate-500">${esc(r.type)} · ${esc(r.size)} (≈ ${fmtNum(VOLUME[r.size], 1)} m³) · reclamado ${relTime(r.reportedAt)} por ${esc(r.reporter || 'vecino')}</div>
+          ${p.why.length ? `<div class="flex flex-wrap gap-1 mt-1.5">${p.why.map(([t, c]) => `<span class="text-[11px] rounded px-1.5 py-0.5 ${c}">${t}</span>`).join('')}</div>` : ''}
+        </div>
+        <div class="flex flex-col gap-1.5 shrink-0">
+          <button data-adm="add" data-id="${r.id}" class="rounded-lg bg-blue-700 hover:bg-blue-800 text-white px-3 py-2 text-sm font-semibold whitespace-nowrap">+ Hoy</button>
+          <button data-adm="detail" data-id="${r.id}" class="rounded-lg ring-1 ring-slate-300 px-3 py-1.5 text-xs">Ver</button>
+        </div></div>`).join('')}</div>
+      <p class="text-xs text-slate-400 mt-3">La prioridad suma: riesgo de dengue (+40), tamaño (hasta +25), días de espera (+2 por día, hasta +30) y vecinos que lo piden (hasta +15).</p>`
+      : `<div class="bg-white rounded-xl ring-1 ring-slate-200 p-8 text-center text-slate-500">${icon('check', 'w-8 h-8 mx-auto text-green-600')}<div class="mt-2 font-medium">No hay reclamos pendientes</div><div class="text-sm">Todo lo reclamado ya está en el recorrido o resuelto.</div></div>`;
+  } else if (adminTab === 'hoy') {
+    body = plan.order.length ? `<div class="bg-white rounded-xl ring-1 ring-slate-200 p-4 mb-3">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+          <div><div class="text-2xl font-bold">${plan.order.length}</div><div class="text-xs text-slate-500">paradas</div></div>
+          <div><div class="text-2xl font-bold">≈ ${fmtNum(plan.km, 1)} km</div><div class="text-xs text-slate-500">ida y vuelta</div></div>
+          <div><div class="text-2xl font-bold">≈ ${fmtMin(plan.min)}</div><div class="text-xs text-slate-500">con carga incluida</div></div>
+          <div><div class="text-2xl font-bold">≈ ${fmtNum(plan.m3, 1)} m³</div><div class="text-xs text-slate-500">a retirar</div></div>
+        </div>
+        <div class="grid sm:grid-cols-3 gap-2 mt-4">
+          <button data-adm="map" class="rounded-lg bg-blue-700 hover:bg-blue-800 text-white py-2.5 text-sm font-semibold inline-flex items-center justify-center gap-1.5">${icon('pin')} Ver recorrido en el mapa</button>
+          <a href="${gmapsRoute(plan.order)}" target="_blank" rel="noopener" class="rounded-lg ring-1 ring-slate-300 bg-white py-2.5 text-sm font-medium inline-flex items-center justify-center gap-1.5">${icon('nav')} Abrir en Google Maps</a>
+          <button data-adm="tab" data-k="cuadrilla" class="rounded-lg ring-1 ring-slate-300 bg-white py-2.5 text-sm font-medium inline-flex items-center justify-center gap-1.5">${icon('truck')} Mandar a la cuadrilla</button>
+        </div>
+        ${plan.order.length > 9 ? '<p class="text-xs text-amber-700 mt-2">Google Maps muestra solo las primeras 9 paradas; el resto seguí la lista.</p>' : ''}
+      </div>
+      <ol class="bg-white rounded-xl ring-1 ring-slate-200 divide-y divide-slate-100">
+        <li class="flex items-center gap-3 px-4 py-3 text-sm text-slate-500"><span class="route-num depot shrink-0">M</span> Salida desde la Municipalidad</li>
+        ${plan.order.map((r, i) => `<li class="flex items-center gap-3 px-4 py-3">
+          <span class="route-num shrink-0">${i + 1}</span>
+          <div class="flex-1 min-w-0"><div class="font-medium truncate">${esc(r.address)}</div>
+            <div class="text-xs text-slate-500">${claimNo(r)} · ${esc(r.type)} · ${esc(r.size)}${waterRisk(r) ? ' · <span class="text-red-700 font-medium">dengue</span>' : ''}</div></div>
+          <button data-adm="remove" data-id="${r.id}" class="text-xs text-slate-500 hover:text-red-700 underline shrink-0">Quitar</button></li>`).join('')}
+        <li class="flex items-center gap-3 px-4 py-3 text-sm text-slate-500"><span class="route-num depot shrink-0">M</span> Vuelta a la Municipalidad</li>
+      </ol>
+      <p class="text-xs text-slate-400 mt-2">El orden se calcula solo: siempre va al punto más cercano. Distancia y tiempo son aproximados.</p>`
+      : `<div class="bg-white rounded-xl ring-1 ring-slate-200 p-8 text-center text-slate-500">${icon('truck', 'w-8 h-8 mx-auto text-slate-400')}<div class="mt-2 font-medium">Todavía no hay retiros para hoy</div>
+          <div class="text-sm">Agregalos desde la bandeja con el botón <b>+ Hoy</b>.</div>
+          <button data-adm="tab" data-k="bandeja" class="mt-3 rounded-lg bg-blue-700 text-white px-4 py-2 text-sm font-semibold">Ir a la bandeja</button></div>`;
+  } else {
+    // Vista de la cuadrilla: así lo vería el chofer en su celular
+    body = `<div class="max-w-sm mx-auto rounded-[2rem] border-[10px] border-slate-900 bg-white overflow-hidden shadow-xl">
+      <div class="bg-blue-700 text-white px-4 py-3"><div class="text-xs text-blue-100">${CREW}</div><div class="font-semibold text-lg">Hoy te toca</div>
+        <div class="text-xs text-blue-100">${plan.order.length} ${pl(plan.order.length, 'parada', 'paradas')} pendientes · ${doneToday.length} ${pl(doneToday.length, 'hecha', 'hechas')}</div></div>
+      <div class="divide-y divide-slate-100">
+        ${plan.order.map((r, i) => `<div class="p-3">
+          <div class="flex gap-3"><span class="route-num shrink-0">${i + 1}</span>
+            <div class="min-w-0 flex-1"><div class="font-semibold text-sm">${esc(r.address)}</div>
+              <div class="text-xs text-slate-500">${esc(r.type)} · ${esc(r.size)} · ${SIZES[r.size].toLowerCase()}</div>
+              ${r.desc ? `<div class="text-xs text-slate-600 mt-1 line-clamp-2">${esc(r.desc)}</div>` : ''}
+              ${waterRisk(r) ? `<div class="text-xs text-red-700 mt-1 font-medium">Retirar primero los recipientes con agua</div>` : ''}</div></div>
+          <div class="grid grid-cols-2 gap-2 mt-2">
+            <a href="${gmapsTo(r)}" target="_blank" rel="noopener" class="rounded-lg ring-1 ring-slate-300 py-2 text-sm font-medium inline-flex items-center justify-center gap-1">${icon('nav')} Cómo llegar</a>
+            <label class="rounded-lg bg-green-700 text-white py-2 text-sm font-semibold inline-flex items-center justify-center gap-1 cursor-pointer">${icon('camera')} Hecho + foto
+              <input type="file" accept="image/*" capture="environment" data-done="${r.id}" class="hidden"></label>
+          </div>
+          <button data-adm="nophoto" data-id="${r.id}" class="block mx-auto mt-1 text-[11px] text-slate-400 underline">Marcar hecho sin foto</button>
+        </div>`).join('') || `<div class="p-6 text-center text-sm text-slate-500">No hay paradas pendientes.${todayIds().length ? '' : ' El encargado todavía no armó el recorrido.'}</div>`}
+        ${doneToday.map(r => `<div class="p-3 flex items-center gap-3 bg-green-50/60"><span class="w-[26px] h-[26px] rounded-full bg-green-600 text-white flex items-center justify-center shrink-0">${icon('check', 'w-4 h-4')}</span>
+          <div class="min-w-0"><div class="text-sm font-medium text-green-900 truncate">${esc(r.address)}</div><div class="text-xs text-green-700">Hecho ${new Date(r.cleanedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })} h${r.afterPhoto ? ' · con foto' : ''}</div></div></div>`).join('')}
+      </div></div>
+      <p class="text-xs text-slate-400 text-center mt-3">Así lo ve el chofer en su celular. Al marcar "Hecho", el punto pasa a verde en el mapa y al vecino le llega el aviso.</p>`;
+  }
+
+  $('#adminContent').innerHTML = head + `
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+      ${stat('Reclamos sin programar', state.reports.filter(r => r.status === 'red').length, 'text-red-700')}
+      ${stat('Para hoy', plan.order.length, 'text-blue-700')}
+      ${stat('Resueltos hoy', doneToday.length, 'text-green-700')}
+      ${stat('Resueltos en 7 días', week, 'text-slate-900')}
+    </div>
+    <div class="flex gap-2 mb-4">
+      ${tabBtn('bandeja', 'Bandeja', 'inbox', inbox.length)}${tabBtn('hoy', 'Recorrido de hoy', 'truck', plan.order.length)}${tabBtn('cuadrilla', 'Cuadrilla', 'users', null)}
+    </div>
+    ${body}
+    <div class="h-8"></div>`;
+}
+
+$('#adminContent').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-adm]'); if (!b) return;
+  const r = b.dataset.id ? state.reports.find(x => x.id === +b.dataset.id) : null;
+  const a = b.dataset.adm;
+  if (a === 'close') return closeModal('adminModal');
+  if (a === 'login') { adminIn = true; sessionStorage.setItem('mapaLimpio.admin', '1'); adminTab = 'bandeja'; }
+  else if (a === 'logout') { adminIn = false; sessionStorage.removeItem('mapaLimpio.admin'); }
+  else if (a === 'tab') adminTab = b.dataset.k;
+  else if (a === 'add' && r) addToday(r);
+  else if (a === 'remove' && r) removeToday(r);
+  else if (a === 'detail' && r) { closeModal('adminModal'); return openDetail(r.id); }
+  else if (a === 'map') return showRouteOnMap();
+  else if (a === 'nophoto' && r) { if (!confirm('Sin foto no queda prueba de cómo quedó. ¿Marcar igual?')) return; crewDone(r, null); }
+  const y = $('#adminModal').scrollTop; renderAdmin(); $('#adminModal').scrollTop = y;
+});
+$('#adminContent').addEventListener('change', async (e) => {
+  const inp = e.target.closest('[data-done]'); if (!inp || !inp.files[0]) return;
+  const r = state.reports.find(x => x.id === +inp.dataset.done); if (!r) return;
+  crewDone(r, await readImage(inp.files[0]));
+  const y = $('#adminModal').scrollTop; renderAdmin(); $('#adminModal').scrollTop = y;
+});
+$('#adminBtn').onclick = () => openAdmin();
+$('#welcomeAdmin').onclick = () => { $('#enterBtn').click(); openAdmin(); };
+
 $('#summaryBtn').onclick = openSummary;
+$('#tabBar').onclick = (e) => {
+  const b = e.target.closest('[data-tabgo]'); if (!b) return;
+  if (b.dataset.tabgo === 'summary') return openSummary();
+  if (b.dataset.tabgo === 'list' && view === 'list') filter = 'all'; // tocar "Puntos" de nuevo limpia el filtro
+  go(b.dataset.tabgo);
+};
 
 refreshDemoDates();
 updateDemoNote();
