@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#047857" />
+<title>Mapa Limpio · San Roque</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] } } } };</script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  .pin { width: 22px; height: 22px; border-radius: 9999px; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+  .pin.selected { width: 30px; height: 30px; box-shadow: 0 0 0 5px rgba(15,23,42,.25), 0 1px 4px rgba(0,0,0,.45); }
+  .pin-red { background: #dc2626; } .pin-yellow { background: #d97706; } .pin-green { background: #16a34a; }
+  .me-dot { width: 18px; height: 18px; border-radius: 9999px; background: #2563eb; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(37,99,235,.25); }
+  .leaflet-top.leaflet-right { top: 64px; }
+  .scroll-thin::-webkit-scrollbar { width: 6px; } .scroll-thin::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius: 3px; }
+  .fade-in { animation: fade .2s ease-out; } @keyframes fade { from { opacity:0; transform: translateY(8px);} to {opacity:1; transform:none;} }
+  .ico { width: 1em; height: 1em; display: inline-block; vertical-align: -0.125em; flex-shrink: 0; }
+  #centerPin { pointer-events: none; }
+  #centerPin .stem { transition: transform .15s; }
+  .map-moving #centerPin .stem { transform: translateY(-10px); }
+  /* Al imprimir (o guardar como PDF) sale solo el resumen */
+  @media print {
+    html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
+    body > *:not(#summaryModal) { display: none !important; }
+    #summaryModal { position: static !important; display: block !important; overflow: visible !important; background: #fff !important; }
+    .no-print { display: none !important; }
+    .avoid-break { break-inside: avoid; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans antialiased">
+
+<!-- ===================== BIENVENIDA ===================== -->
+<div id="welcome" class="hidden fixed inset-0 z-[3000] bg-gradient-to-b from-emerald-800 to-emerald-950 text-white flex flex-col">
+  <div class="flex-1 flex flex-col items-center justify-center px-8 text-center">
+    <div class="w-20 h-20 rounded-2xl bg-white/10 ring-1 ring-white/20 flex items-center justify-center mb-6" data-icon="leaf" data-cls="w-11 h-11"></div>
+    <div class="text-xs uppercase tracking-widest text-emerald-200 mb-2">Municipalidad de San Roque · Corrientes</div>
+    <h1 class="text-3xl font-bold">Bienvenido a Mapa Limpio</h1>
+    <p class="text-emerald-100 mt-3 max-w-sm">Avisá dónde hay basura acumulada, sumate a las limpiezas del barrio y seguí cómo se recuperan los espacios.</p>
+    <div class="w-full max-w-xs mt-8 text-left">
+      <label for="nameInput" class="text-sm text-emerald-100">¿Cómo te llamás? <span class="text-emerald-300">(opcional)</span></label>
+      <input id="nameInput" maxlength="30" autocomplete="given-name" class="mt-1 w-full rounded-lg bg-white/10 ring-1 ring-white/25 px-4 py-3 text-white placeholder-emerald-200/60 focus:outline-none focus:ring-2 focus:ring-white" placeholder="Tu nombre" />
+    </div>
+  </div>
+  <div class="px-8 pb-10 space-y-3 max-w-sm w-full mx-auto">
+    <button id="enterBtn" class="w-full bg-white text-emerald-900 font-semibold rounded-lg py-3.5 text-lg active:scale-[.98] transition">Entrar</button>
+    <button id="welcomeInfo" class="w-full text-emerald-100 text-sm py-2">¿Qué es Mapa Limpio?</button>
+    <p id="demoNote" class="text-[11px] text-emerald-300/70 text-center">Versión de prueba. Los puntos del mapa son ejemplos.</p>
+  </div>
+</div>
+
+<!-- ===================== APP ===================== -->
+<div class="relative h-full w-full">
+
+  <!-- Mapa -->
+  <div id="mapWrap" class="absolute inset-0 lg:left-[400px]">
+    <div id="map" class="absolute inset-0 z-0"></div>
+
+    <!-- Pin central para elegir ubicación -->
+    <div id="centerPin" class="hidden absolute inset-0 z-[450] flex items-center justify-center">
+      <div class="stem -mt-12 flex flex-col items-center">
+        <svg width="40" height="52" viewBox="0 0 40 52"><path d="M20 0C9 0 0 9 0 20c0 15 20 32 20 32s20-17 20-32C40 9 31 0 20 0z" fill="#dc2626"/><circle cx="20" cy="20" r="7" fill="#fff"/></svg>
+      </div>
+      <div class="absolute w-2 h-2 rounded-full bg-slate-900/40"></div>
+    </div>
+
+    <!-- Buscador -->
+    <div class="absolute top-3 left-3 right-3 z-[600] lg:max-w-md">
+      <div class="flex gap-2">
+        <div class="flex-1 relative">
+          <div class="flex items-center bg-white rounded-lg shadow-md ring-1 ring-slate-200 px-3">
+            <span class="text-slate-400" data-icon="search" data-cls="w-5 h-5"></span>
+            <input id="searchInput" type="search" autocomplete="off" class="flex-1 px-2 py-3 text-[15px] bg-transparent focus:outline-none" placeholder="Buscar calle o lugar en San Roque" />
+            <button id="searchClear" class="hidden text-slate-400 p-1" data-icon="x" data-cls="w-4 h-4"></button>
+          </div>
+          <div id="searchResults" class="hidden absolute left-0 right-0 mt-1 bg-white rounded-lg shadow-lg ring-1 ring-slate-200 overflow-hidden max-h-72 overflow-y-auto"></div>
+        </div>
+        <button id="summaryBtn" class="bg-white rounded-lg shadow-md ring-1 ring-slate-200 w-12 flex items-center justify-center text-slate-600" data-icon="chart" data-cls="w-5 h-5" title="Resumen y estadísticas"></button>
+        <button id="infoBtn"class="bg-white rounded-lg shadow-md ring-1 ring-slate-200 w-12 flex items-center justify-center text-slate-600" data-icon="info" data-cls="w-5 h-5" title="Sobre el proyecto"></button>
+      </div>
+    </div>
+
+    <!-- Botones del mapa -->
+    <div class="absolute right-[10px] top-[150px] z-[500] flex flex-col gap-2">
+      <button id="locateBtn" title="Mi ubicación" class="w-[34px] h-[34px] bg-white rounded shadow ring-1 ring-black/10 flex items-center justify-center text-slate-700" data-icon="locate" data-cls="w-5 h-5"></button>
+      <button id="layerBtn" title="Satélite / Calles" class="w-[34px] h-[34px] bg-white rounded shadow ring-1 ring-black/10 flex items-center justify-center text-slate-700" data-icon="layers" data-cls="w-5 h-5"></button>
+    </div>
+  </div>
+
+  <!-- Panel: abajo en celular, a la izquierda en computadora -->
+  <div id="panel" class="absolute z-[700] inset-x-0 bottom-0 lg:inset-y-0 lg:left-0 lg:right-auto lg:w-[400px] bg-white rounded-t-2xl lg:rounded-none shadow-[0_-4px_24px_rgba(0,0,0,.15)] lg:shadow-none lg:border-r lg:border-slate-200 flex flex-col max-h-[62vh] lg:max-h-none">
+    <div class="lg:hidden flex justify-center pt-2 pb-1"><div class="w-10 h-1 rounded-full bg-slate-300"></div></div>
+    <div class="hidden lg:flex items-center gap-2.5 px-5 h-16 border-b border-slate-200 shrink-0">
+      <div class="w-8 h-8 rounded-lg bg-emerald-700 text-white flex items-center justify-center" data-icon="leaf" data-cls="w-5 h-5"></div>
+      <div class="leading-tight"><div class="font-semibold">Mapa Limpio</div><div class="text-xs text-slate-500">San Roque, Corrientes</div></div>
+    </div>
+    <div id="panelBody" class="overflow-y-auto scroll-thin flex-1 pb-[env(safe-area-inset-bottom)]"></div>
+  </div>
+</div>
+
+<!-- ===================== FICHA ===================== -->
+<div id="detailModal" class="hidden fixed inset-0 z-[1000] bg-slate-900/50 flex items-end sm:items-center justify-center">
+  <div id="detailContent" class="fade-in bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl max-h-[92vh] overflow-y-auto scroll-thin"></div>
+</div>
+
+<!-- ===================== SOBRE EL PROYECTO ===================== -->
+<div id="infoModal" class="hidden fixed inset-0 z-[3500] bg-slate-900/50 flex items-end sm:items-center justify-center">
+  <div class="fade-in bg-white w-full sm:max-w-2xl rounded-t-2xl sm:rounded-xl max-h-[92vh] flex flex-col">
+    <div class="px-5 pt-5 pb-3 flex items-start justify-between gap-3">
+      <div>
+        <h2 class="font-semibold text-xl">Sobre Mapa Limpio</h2>
+        <p class="text-sm text-slate-500 mt-0.5">Un mapa hecho entre vecinos y municipio para saber dónde hay basura acumulada y organizarnos para sacarla.</p>
+      </div>
+      <button data-close="infoModal" class="p-1.5 rounded-md hover:bg-slate-100 shrink-0" data-icon="x" data-cls="w-5 h-5"></button>
+    </div>
+    <div class="flex gap-4 px-5 overflow-x-auto border-b border-slate-200">
+      <button data-tab="problema" class="info-tab shrink-0 py-2 text-sm font-medium border-b-2">El problema</button>
+      <button data-tab="salud" class="info-tab shrink-0 py-2 text-sm font-medium border-b-2">Salud</button>
+      <button data-tab="ley" class="info-tab shrink-0 py-2 text-sm font-medium border-b-2">Normativa</button>
+      <button data-tab="seguridad" class="info-tab shrink-0 py-2 text-sm font-medium border-b-2">Antes de limpiar</button>
+      <button data-tab="datos" class="info-tab shrink-0 py-2 text-sm font-medium border-b-2">Datos</button>
+    </div>
+    <div class="overflow-y-auto scroll-thin px-5 py-4 text-sm leading-relaxed text-slate-700">
+      <section data-panel="problema" class="info-panel space-y-3">
+        <p>En casi todos los barrios hay una esquina, un baldío o una zanja donde la gente tira lo que el camión no se lleva: ramas después de una tormenta, escombros de una obra, un colchón viejo, bolsas. Empieza chico y, si nadie lo frena, crece, porque donde ya hay basura es más fácil que alguien tire más.</p>
+        <p>A eso le decimos <b>microbasural</b>. No es el basural municipal, sino esos puntos chicos repartidos por todo el pueblo que nadie tiene registrados.</p>
+        <p>En localidades del interior de Corrientes como San Roque se suman algunas cosas: la recolección no pasa todos los días por todos lados, hay muchos terrenos sin cerrar y zonas bajas que se inundan cuando llueve fuerte.</p>
+        <p>Según datos oficiales, en Argentina cada persona genera en promedio algo más de un kilo de residuos por día, y el Ministerio de Ambiente de la Nación tiene relevados miles de basurales a cielo abierto en el país. Los microbasurales de barrio casi nunca aparecen en ninguna estadística.</p>
+        <div class="border-l-4 border-emerald-700 bg-emerald-50 px-4 py-3 text-slate-800">Cualquiera puede marcar un punto desde el celular en menos de un minuto. Así se ve dónde están, quién se anota para limpiar, y el municipio sabe dónde mandar el camión.</div>
+      </section>
+      <section data-panel="salud" class="info-panel hidden space-y-3">
+        <p><b>Dengue.</b> El mosquito <i>Aedes aegypti</i> se cría en cualquier cosa que junte agua: cubiertas, latas, botellas, baldes. El NEA es una de las zonas más golpeadas del país, y la temporada 2023-2024 fue la peor epidemia de dengue registrada en Argentina. Sacar un basural es también descacharrar.</p>
+        <p><b>Ratas y leptospirosis.</b> Los basurales atraen roedores. La leptospirosis se contagia por agua o barro contaminados con su orina y aumenta después de las inundaciones.</p>
+        <p><b>Quema.</b> Quemar basura con plásticos larga humo tóxico, y en época seca puede terminar en incendio de pastizales.</p>
+        <p><b>Desagües.</b> La basura tapa zanjas y pluviales, y cuando llueve el agua no tiene por dónde salir.</p>
+      </section>
+      <section data-panel="ley" class="info-panel hidden space-y-4">
+        <div><div class="font-semibold text-slate-900">Constitución Nacional, art. 41</div><p>Derecho de todos los habitantes a un ambiente sano y deber de preservarlo.</p></div>
+        <div><div class="font-semibold text-slate-900">Ley 25.675, Ley General del Ambiente</div><p>Presupuestos mínimos de la política ambiental; derecho a participar y a acceder a la información ambiental.</p></div>
+        <div><div class="font-semibold text-slate-900">Ley 25.916, Gestión de Residuos Domiciliarios</div><p>Presupuestos mínimos para la gestión integral de los residuos domiciliarios. La gestión en cada jurisdicción queda a cargo de las autoridades locales.</p></div>
+        <div><div class="font-semibold text-slate-900">Ordenanzas municipales</div><p>Definen los días de recolección, el retiro de poda, escombros y voluminosos, y las sanciones por arrojar o quemar residuos.</p></div>
+        <div><div class="font-semibold text-slate-900">Organismo provincial</div><p>En Corrientes: Instituto Correntino del Agua y del Ambiente (ICAA).</p></div>
+        <p class="text-xs text-slate-400 pt-2 border-t border-slate-100">Resumen informativo. No reemplaza el texto de las normas.</p>
+      </section>
+      <section data-panel="seguridad" class="info-panel hidden space-y-3">
+        <ul class="list-disc pl-5 space-y-2">
+          <li><b>Guantes gruesos y calzado cerrado</b>, sin excepción. Pantalón largo, gorra y agua.</li>
+          <li><b>No toquen jeringas, agujas, medicamentos ni bidones de agroquímicos.</b> Marquen el lugar y avisen al centro de salud o a la Municipalidad.</li>
+          <li><b>No quemen nada.</b></li>
+          <li><b>Arreglen el retiro antes de juntar.</b> Si las bolsas quedan ahí, el basural vuelve.</li>
+          <li><b>Los chicos, siempre acompañados</b> y en tareas tranquilas.</li>
+          <li>Lleven <b>botiquín</b>. Si alguien se corta, que consulte por la antitetánica.</li>
+        </ul>
+        <div class="rounded-md border border-slate-200 bg-slate-50 px-4 py-3"><div class="font-medium text-slate-900 mb-1">Emergencias</div>107 Emergencias médicas · 100 Bomberos · 101 Policía</div>
+      </section>
+      <section data-panel="datos" class="info-panel hidden space-y-4">
+        <div id="dataSummary" class="rounded-md border border-slate-200 bg-slate-50 px-4 py-3"></div>
+        <div>
+          <div class="font-semibold text-slate-900 mb-2">Exportar</div>
+          <div class="grid sm:grid-cols-2 gap-2">
+            <button data-export="csv" class="text-left rounded-lg ring-1 ring-slate-300 px-3 py-2.5 hover:bg-slate-50"><div class="font-medium text-slate-900">Planilla (CSV)</div><div class="text-xs text-slate-500">Para abrir en Excel o Google Sheets</div></button>
+            <button data-export="geojson" class="text-left rounded-lg ring-1 ring-slate-300 px-3 py-2.5 hover:bg-slate-50"><div class="font-medium text-slate-900">Mapa (GeoJSON)</div><div class="text-xs text-slate-500">Para QGIS u otros programas de mapas</div></button>
+          </div>
+        </div>
+        <div>
+          <div class="font-semibold text-slate-900 mb-1">Relevamiento</div>
+          <p class="text-slate-600 mb-2">Para cargar los basurales reales: recorré el barrio con el celular y reportá cada punto con foto. Después guardá un respaldo y abrilo en la compu (o en otro celular) para juntar todo en un solo mapa.</p>
+          <div class="grid sm:grid-cols-2 gap-2">
+            <button data-export="backup" class="text-left rounded-lg ring-1 ring-slate-300 px-3 py-2.5 hover:bg-slate-50"><div class="font-medium text-slate-900">Guardar respaldo</div><div class="text-xs text-slate-500">Archivo con todos los puntos y fotos</div></button>
+            <label class="text-left rounded-lg ring-1 ring-slate-300 px-3 py-2.5 hover:bg-slate-50 cursor-pointer"><div class="font-medium text-slate-900">Sumar puntos de un respaldo</div><div class="text-xs text-slate-500">No duplica los que ya están</div>
+              <input type="file" accept=".json,application/json" id="importFile" class="hidden"></label>
+          </div>
+        </div>
+        <div id="demoRemoveBox" class="rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+          <div class="font-medium text-amber-900">Puntos de ejemplo</div>
+          <p class="text-amber-800 text-xs mt-0.5">Cuando tengas los puntos reales cargados, sacá los de ejemplo antes de mostrar el mapa.</p>
+          <button id="removeDemoBtn" class="mt-2 rounded-md bg-white ring-1 ring-amber-300 px-3 py-1.5 text-sm font-medium text-amber-900">Quitar puntos de ejemplo</button>
+        </div>
+        <p class="text-xs text-slate-400">Por ahora los datos quedan solo en este navegador. Si se borran los datos del navegador, se pierden: guardá un respaldo seguido.</p>
+      </section>
+    </div>
+    <div class="border-t border-slate-200 px-5 py-3 flex justify-between text-xs text-slate-400">
+      <span>Versión de prueba</span>
+      <button id="resetBtn" class="hover:text-slate-600 underline">Reiniciar datos de ejemplo</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== RESUMEN ===================== -->
+<div id="summaryModal" class="hidden fixed inset-0 z-[3200] bg-slate-100 overflow-y-auto scroll-thin">
+  <div id="summaryContent" class="max-w-5xl mx-auto px-4 sm:px-6 py-5"></div>
+</div>
+
+<div id="toast"class="hidden fixed top-20 left-1/2 -translate-x-1/2 z-[4000] bg-slate-900 text-white text-sm rounded-lg px-4 py-2.5 shadow-xl max-w-[90vw] text-center"></div>
+
+<script>
+// ================= Íconos =================
+const ICONS = {
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+  pin: '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  share: '<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+  locate: '<path d="m3 11 19-9-9 19-2-8-8-2z"/>',
+  layers: '<path d="m12 2 10 5-10 5L2 7l10-5z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>',
+  leaf: '<path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>',
+  alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h16.9a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  back: '<path d="m15 18-6-6 6-6"/>',
+  chevron: '<path d="m9 18 6-6-6-6"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  megaphone: '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M8 17v-5M13 17V8M18 17v-8"/>',
+  print: '<path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
+};
+const icon = (n, cls = 'ico') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
+const hydrateIcons = (root = document) => root.querySelectorAll('[data-icon]').forEach(el => el.innerHTML = icon(el.dataset.icon, el.dataset.cls || 'ico'));
+
+// ================= Configuración =================
+const TOWN = { name: 'San Roque, Corrientes', center: [-28.5735, -58.7090], zoom: 15 };
+const BBOX = [-58.76, -28.62, -58.66, -28.53]; // lon/lat mínimos y máximos para buscar calles
+const STATUS = {
+  red:    { label: 'Reportado',           dot: 'bg-red-600',   text: 'text-red-700',   badge: 'bg-red-50 text-red-700 ring-red-200',       pin: 'pin-red' },
+  yellow: { label: 'Limpieza programada', dot: 'bg-amber-600', text: 'text-amber-700', badge: 'bg-amber-50 text-amber-800 ring-amber-200', pin: 'pin-yellow' },
+  green:  { label: 'Limpio',              dot: 'bg-green-600', text: 'text-green-700', badge: 'bg-green-50 text-green-700 ring-green-200', pin: 'pin-green' },
+};
+const TYPES = ['Domiciliarios', 'Poda', 'Escombros', 'Voluminosos'];
+const TYPE_HINT = { Domiciliarios: 'Bolsas, envases', Poda: 'Ramas, pasto, troncos', Escombros: 'Restos de obra', Voluminosos: 'Colchones, muebles, chatarra' };
+const SIZES = { Chico: 'Unas bolsas', Mediano: 'Una camioneta', Grande: 'Hace falta camión' };
+
+function placeholder(type) {
+  const tone = { Domiciliarios: '#64748b', Poda: '#4d7c0f', Escombros: '#92400e', Voluminosos: '#57534e', Limpio: '#15803d' }[type] || '#64748b';
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='400' height='240'><rect width='400' height='240' fill='${tone}'/><g fill='none' stroke='rgba(255,255,255,.55)' stroke-width='5' stroke-linecap='round' stroke-linejoin='round' transform='translate(176 84) scale(2)'><path d='M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z'/><circle cx='12' cy='13' r='3'/></g><text x='200' y='200' font-family='Inter,Arial' font-size='15' fill='rgba(255,255,255,.75)' text-anchor='middle'>${type === 'Limpio' ? 'Espacio recuperado' : 'Sin foto'}</text></svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+const daysAgo = (n, h = 10) => { const d = new Date(); d.setDate(d.getDate() - n); d.setHours(h, 0, 0, 0); return d.toISOString(); };
+const daysAhead = (n, h) => { const d = new Date(); d.setDate(d.getDate() + n); d.setHours(h, 0, 0, 0); return d.toISOString(); };
+
+function mockData() {
+  const [lat, lng] = TOWN.center;
+  return [
+    { id: 1, lat: lat + 0.0042, lng: lng - 0.0051, status: 'red', type: 'Domiciliarios', size: 'Grande', address: 'Baldío al lado de la vía', reporter: 'Marta G.',
+      desc: 'Hace como tres semanas que tiran bolsas acá. Los perros las rompen y queda todo desparramado. También hay un par de cubiertas con agua.', reportedAt: daysAgo(3, 19), volunteers: 4, scheduledAt: null },
+    { id: 2, lat: lat - 0.0035, lng: lng + 0.0062, status: 'red', type: 'Escombros', size: 'Mediano', address: 'Belgrano, frente a la plaza', reporter: 'Luis P.',
+      desc: 'Restos de una obra en la vereda. No se puede pasar con el cochecito, hay que bajar a la calle.', reportedAt: daysAgo(1, 8), volunteers: 1, scheduledAt: null },
+    { id: 3, lat: lat + 0.0021, lng: lng + 0.0045, status: 'yellow', type: 'Poda', size: 'Grande', address: 'Esquina de la escuela', reporter: 'Comisión del club',
+      desc: 'Ramas y troncos que quedaron de la última tormenta. Ya hablamos con la Municipalidad y el camión viene el mismo día.', reportedAt: daysAgo(6, 11), volunteers: 12,
+      scheduledAt: daysAhead(2, 9), meetNote: 'Nos juntamos en la puerta de la escuela. Traer guantes y rastrillo.' },
+    { id: 4, lat: lat - 0.0048, lng: lng - 0.0030, status: 'yellow', type: 'Voluminosos', size: 'Mediano', address: 'Bajada al río', reporter: 'Ana R.',
+      desc: 'Dos colchones, un sillón y chatarra. Si alguien tiene camioneta nos salva.', reportedAt: daysAgo(9, 16), volunteers: 7,
+      scheduledAt: daysAhead(5, 8), meetNote: 'Arriba de la bajada, 8 en punto.' },
+    { id: 5, lat: lat + 0.0006, lng: lng - 0.0072, status: 'green', type: 'Domiciliarios', size: 'Chico', address: 'Pasaje sin salida, a mitad de cuadra', reporter: 'Jorge S.',
+      desc: 'Bolsas y restos de un patio, al fondo del pasaje.', reportedAt: daysAgo(20, 9), volunteers: 9, scheduledAt: daysAgo(12, 9), cleanedAt: daysAgo(12, 12),
+      cleanedBy: 'Jorge S.', cleanNote: 'Lo limpiamos entre nueve vecinos. Plantamos tres lapachos y pusimos un cartel.' },
+  ].map(withHistory);
+}
+// Historial de ejemplo armado a partir de los datos de cada punto
+function withHistory(r) {
+  const t = (iso, plusH) => new Date(new Date(iso).getTime() + plusH * 3600000).toISOString();
+  const h = [{ at: r.reportedAt, by: r.reporter, text: 'Reportó el basural' }];
+  r.demo = true;
+  if (r.volunteers > 1) h.push({ at: t(r.reportedAt, 20), by: `${r.volunteers - 1} vecinos`, text: 'Se anotaron para limpiar' });
+  if (r.id === 1) h.push({ at: t(r.reportedAt, 40), by: 'Carlos M.', text: 'Comentó: "Sigue igual, ahora hay más bolsas"' });
+  if (r.scheduledAt && r.status !== 'red') h.push({ at: t(r.reportedAt, 30), by: r.reporter, text: `Programó la limpieza para el ${fmtShort(r.scheduledAt)}` });
+  if (r.cleanedAt) h.push({ at: r.cleanedAt, by: r.cleanedBy, text: 'Marcó el lugar como limpio' });
+  return { ...r, history: h, photos: [] };
+}
+
+// ================= Estado =================
+const STORE_KEY = 'mapaLimpio.v4';
+const demoState = () => ({ reports: mockData(), joined: [], seededAt: new Date().toISOString() });
+let state = (() => { try { return JSON.parse(localStorage.getItem(STORE_KEY)); } catch { return null; } })() || demoState();
+let userName = localStorage.getItem('mapaLimpio.nombre') || '';
+let view = 'home';     // home | list | join | report | done
+let step = null;       // loc | what | photo  (dentro de report)
+let filter = 'all', selectedId = null, draft = null, lastCreatedId = null;
+const markers = {};
+const save = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); return true; } catch { toast('No se pudo guardar: la memoria del navegador está llena. Exportá un respaldo desde "Datos".'); return false; } };
+
+// Los puntos de ejemplo se corren de fecha cada día para que la demo no "envejezca"
+// (si no, a la semana las jornadas próximas ya pasaron). Un punto que alguien tocó queda fijo.
+function refreshDemoDates() {
+  const DAY = 86400000, mid = (d) => new Date(d).setHours(0, 0, 0, 0);
+  if (!state.seededAt) {
+    // Datos guardados con la versión anterior: reconocer los 5 puntos de ejemplo originales
+    const seed = Object.fromEntries(mockData().map(m => [m.id, m.reporter]));
+    state.reports.forEach(r => { if (seed[r.id] && seed[r.id] === r.reporter) r.demo = true; });
+    state.seededAt = new Date().toISOString(); save(); return;
+  }
+  const days = Math.round((mid(Date.now()) - mid(state.seededAt)) / DAY);
+  if (days <= 0) return;
+  const shift = (iso) => iso ? new Date(new Date(iso).getTime() + days * DAY).toISOString() : iso;
+  state.reports.filter(r => r.demo && !r.touched).forEach(r => {
+    r.reportedAt = shift(r.reportedAt); r.scheduledAt = shift(r.scheduledAt); r.cleanedAt = shift(r.cleanedAt);
+    (r.history || []).forEach(h => h.at = shift(h.at));
+  });
+  state.seededAt = new Date().toISOString(); save();
+}
+
+// ================= Utilidades =================
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const photoOf = (r) => r.status === 'green' ? (r.afterPhoto || placeholder('Limpio')) : (r.photo || placeholder(r.type));
+const me = () => userName || 'Vecino/a';
+let cleanDraft = null;
+function log(r, text) { r.touched = true; (r.history ||= []).push({ at: new Date().toISOString(), by: me(), text }); }
+// Achica la foto en el celular antes de guardarla (máx. 600 px)
+function readImage(file) {
+  return new Promise((resolve, reject) => {
+    const rd = new FileReader(); rd.onerror = reject;
+    rd.onload = () => { const img = new Image(); img.onerror = reject; img.onload = () => {
+      const cv = document.createElement('canvas'), s = Math.min(1, 600 / Math.max(img.width, img.height));
+      cv.width = img.width * s; cv.height = img.height * s; cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      resolve(cv.toDataURL('image/jpeg', 0.7));
+    }; img.src = rd.result; };
+    rd.readAsDataURL(file);
+  });
+}
+function showImage(src, caption) {
+  const d = document.createElement('div');
+  d.className = 'fixed inset-0 z-[5000] bg-black/90 flex flex-col items-center justify-center p-4 fade-in';
+  d.innerHTML = `<img src="${src}" class="max-h-[80vh] max-w-full rounded-lg"><div class="text-white text-sm mt-3">${esc(caption || '')}</div><div class="text-white/50 text-xs mt-1">Tocá para cerrar</div>`;
+  d.onclick = () => d.remove(); document.body.append(d);
+}
+const fmtDate = (iso) => new Date(iso).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
+function fmtDateTime(iso) { const s = new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }); return s[0].toUpperCase() + s.slice(1) + ' h'; }
+function fmtShort(iso) { const s = new Date(iso).toLocaleString('es-AR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); return s[0].toUpperCase() + s.slice(1) + ' h'; }
+function relTime(iso) { const d = Math.floor((Date.now() - new Date(iso)) / 86400000); if (d <= 0) return 'hoy'; if (d === 1) return 'ayer'; if (d < 7) return `hace ${d} días`; return `hace ${Math.floor(d / 7)} sem.`; }
+function untilText(iso) { const d = Math.round((new Date(iso).setHours(0,0,0,0) - new Date().setHours(0,0,0,0)) / 86400000); if (d === 0) return 'Hoy'; if (d === 1) return 'Mañana'; if (d < 0) return 'Ya pasó'; return `En ${d} días`; }
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add('hidden'), 2600); }
+const openModal = (id) => $('#' + id).classList.remove('hidden');
+function closeModal(id) {
+  const el = $('#' + id); if (el.classList.contains('hidden')) return;
+  el.classList.add('hidden');
+  if (id === 'detailModal') { selectedId = null; renderMarkers(); }
+}
+const isMobile = () => window.innerWidth < 1024;
+
+// ================= Mapa =================
+const map = L.map('map', { zoomControl: false, maxZoom: 20 }).setView(TOWN.center, TOWN.zoom);
+L.control.zoom({ position: 'topright' }).addTo(map);
+const streetLayers = [
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 20, subdomains: 'abcd', attribution: '&copy; OpenStreetMap &copy; CARTO' }),
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20, maxNativeZoom: 19, attribution: 'Tiles &copy; Esri' }),
+];
+const satLayer = L.layerGroup([
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20, maxNativeZoom: 19, attribution: 'Imágenes &copy; Esri, Maxar' }),
+  // nombres de calles encima de la foto satelital
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', { maxZoom: 20, subdomains: 'abcd' }),
+]);
+let streetIdx = 0, streetOk = false, streetErr = 0, satOn = false;
+streetLayers[0].on('tileload', () => streetOk = true);
+streetLayers[0].on('tileerror', () => { if (!streetOk && ++streetErr >= 4 && streetIdx === 0) { map.removeLayer(streetLayers[0]); streetIdx = 1; if (!satOn) streetLayers[1].addTo(map); } });
+streetLayers[0].addTo(map);
+$('#layerBtn').onclick = () => {
+  satOn = !satOn;
+  if (satOn) { map.removeLayer(streetLayers[streetIdx]); satLayer.addTo(map); toast('Vista satelital'); }
+  else { map.removeLayer(satLayer); streetLayers[streetIdx].addTo(map); toast('Vista de calles'); }
+};
+
+// Si el panel tapa la parte de abajo del mapa en el celular, corremos el centro hacia arriba
+function flyToPoint(latlng, zoom) {
+  const z = zoom ?? Math.max(map.getZoom(), 17);
+  if (!isMobile() || (view === 'report' && step === 'loc')) return map.flyTo(latlng, z, { duration: .5 });
+  const offsetPx = $('#panel').offsetHeight / 2;
+  const p = map.project(latlng, z).add([0, offsetPx]);
+  map.flyTo(map.unproject(p, z), z, { duration: .5 });
+}
+
+function pinIcon(r) {
+  const sel = r.id === selectedId, s = sel ? 30 : 22;
+  return L.divIcon({ className: '', iconSize: [s, s], iconAnchor: [s / 2, s / 2], html: `<div class="pin ${STATUS[r.status].pin}${sel ? ' selected' : ''}"></div>` });
+}
+function renderMarkers() {
+  Object.values(markers).forEach(m => map.removeLayer(m));
+  for (const k in markers) delete markers[k];
+  state.reports.forEach(r => {
+    const m = L.marker([r.lat, r.lng], { icon: pinIcon(r), zIndexOffset: r.id === selectedId ? 1000 : 0 }).addTo(map);
+    m.bindTooltip(`<b>${esc(r.type)}</b> · ${esc(r.size)}<br><span style="color:#64748b">${STATUS[r.status].label}</span>`, { direction: 'top', offset: [0, -12] });
+    m.on('click', () => { if (view !== 'report') openDetail(r.id); });
+    markers[r.id] = m;
+  });
+}
+
+// Mi ubicación
+let meMarker = null;
+$('#locateBtn').onclick = () => locateMe(true);
+function locateMe(fly) {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) { toast('Tu dispositivo no permite ubicar'); return resolve(null); }
+    toast('Buscando tu ubicación...');
+    navigator.geolocation.getCurrentPosition(p => {
+      const ll = L.latLng(p.coords.latitude, p.coords.longitude);
+      if (ll.distanceTo(TOWN.center) > 25000) { toast('Estás fuera de San Roque. Te mostramos el centro.'); if (fly) flyToPoint(TOWN.center, 16); return resolve(null); }
+      if (meMarker) map.removeLayer(meMarker);
+      meMarker = L.marker(ll, { icon: L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: '<div class="me-dot"></div>' }), interactive: false }).addTo(map);
+      if (fly) flyToPoint(ll, 18);
+      $('#toast').classList.add('hidden');
+      resolve(ll);
+    }, () => { toast('No pudimos obtener tu ubicación. Activá el GPS o mové el mapa.'); resolve(null); }, { enableHighAccuracy: true, timeout: 8000 });
+  });
+}
+
+// ================= Buscador de calles (Photon / OpenStreetMap) =================
+let searchTimer = null, searchCtl = null;
+function labelOf(p) {
+  const street = p.street ? `${p.street}${p.housenumber ? ' ' + p.housenumber : ''}` : '';
+  const main = p.name && p.name !== p.street ? p.name : (street || p.name || 'Lugar sin nombre');
+  const sub = [p.name && street && p.name !== p.street ? street : '', p.district || p.locality, p.city || p.county].filter(Boolean).join(', ');
+  return { main, sub };
+}
+$('#searchInput').addEventListener('input', (e) => {
+  const q = e.target.value.trim();
+  $('#searchClear').classList.toggle('hidden', !q);
+  clearTimeout(searchTimer);
+  if (q.length < 3) { $('#searchResults').classList.add('hidden'); return; }
+  searchTimer = setTimeout(() => doSearch(q), 350);
+});
+$('#searchClear').onclick = () => { $('#searchInput').value = ''; $('#searchClear').classList.add('hidden'); $('#searchResults').classList.add('hidden'); };
+async function doSearch(q) {
+  const box = $('#searchResults');
+  box.classList.remove('hidden');
+  box.innerHTML = `<div class="px-4 py-3 text-sm text-slate-500">Buscando...</div>`;
+  try {
+    searchCtl?.abort(); searchCtl = new AbortController();
+    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=7&lat=${TOWN.center[0]}&lon=${TOWN.center[1]}&bbox=${BBOX.join(',')}`;
+    const res = await fetch(url, { signal: searchCtl.signal });
+    const data = await res.json();
+    const feats = data.features || [];
+    if (!feats.length) { box.innerHTML = `<div class="px-4 py-3 text-sm text-slate-500">No encontramos "${esc(q)}" en San Roque. Probá con otro nombre o mové el mapa a mano.</div>`; return; }
+    box.innerHTML = feats.map((f, i) => {
+      const { main, sub } = labelOf(f.properties);
+      return `<button data-res="${i}" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex gap-3 items-start border-b border-slate-100 last:border-0">
+        <span class="text-slate-400 mt-0.5">${icon('pin')}</span><span><span class="block text-sm font-medium">${esc(main)}</span><span class="block text-xs text-slate-500">${esc(sub)}</span></span></button>`;
+    }).join('');
+    box.querySelectorAll('[data-res]').forEach(b => b.onclick = () => {
+      const f = feats[+b.dataset.res]; const [lon, lat] = f.geometry.coordinates;
+      box.classList.add('hidden'); $('#searchInput').blur();
+      $('#searchInput').value = labelOf(f.properties).main;
+      flyToPoint([lat, lon], 18);
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    box.innerHTML = `<div class="px-4 py-3 text-sm text-slate-500">No hay conexión con el buscador. Mové el mapa con el dedo.</div>`;
+  }
+}
+document.addEventListener('click', (e) => { if (!e.target.closest('#searchResults') && e.target.id !== 'searchInput') $('#searchResults').classList.add('hidden'); });
+
+// Dirección del punto central (para el reporte)
+let revTimer = null, revCtl = null;
+async function reverseGeocode(lat, lng) {
+  try {
+    revCtl?.abort(); revCtl = new AbortController();
+    const res = await fetch(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lng}&limit=1`, { signal: revCtl.signal });
+    const p = (await res.json()).features?.[0]?.properties;
+    if (!p) return null;
+    if (p.street) return `${p.street}${p.housenumber ? ' ' + p.housenumber : ''}`;
+    return p.name || null;
+  } catch { return null; }
+}
+map.on('movestart', () => { if (view === 'report' && step === 'loc') document.body.classList.add('map-moving'); });
+map.on('moveend', () => {
+  document.body.classList.remove('map-moving');
+  if (view !== 'report' || step !== 'loc') return;
+  const c = map.getCenter(); draft.lat = c.lat; draft.lng = c.lng;
+  draft.street = null; draft.streetLoading = true; updateLocText();
+  clearTimeout(revTimer);
+  revTimer = setTimeout(async () => {
+    const s = await reverseGeocode(c.lat, c.lng);
+    if (draft && Math.abs(draft.lat - c.lat) < 1e-9) { draft.street = s; draft.streetLoading = false; updateLocText(); }
+  }, 400);
+});
+function updateLocText() {
+  const el = $('#locText'); if (!el) return;
+  const zoomOk = map.getZoom() >= 17;
+  el.innerHTML = draft.streetLoading ? `<span class="text-slate-400">Buscando la calle...</span>`
+    : draft.street ? `<span class="font-medium">Cerca de ${esc(draft.street)}</span>`
+    : `<span class="text-slate-500">Punto ${draft.lat.toFixed(5)}, ${draft.lng.toFixed(5)}</span>`;
+  const hint = $('#zoomHint'); if (hint) hint.classList.toggle('hidden', zoomOk);
+}
+
+// ================= Panel =================
+function counts() { const c = { red: 0, yellow: 0, green: 0 }; state.reports.forEach(r => c[r.status]++); return c; }
+const upcoming = () => state.reports.filter(r => r.status === 'yellow' && new Date(r.scheduledAt) >= new Date(new Date().setHours(0,0,0,0))).sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
+
+function header(title, subtitle) {
+  return `<div class="flex items-center gap-2 px-4 pt-2 pb-3 border-b border-slate-100 sticky top-0 bg-white z-10">
+    <button data-go="home" class="p-2 -ml-2 rounded-lg hover:bg-slate-100">${icon('back', 'w-5 h-5')}</button>
+    <div><div class="font-semibold">${title}</div>${subtitle ? `<div class="text-xs text-slate-500">${subtitle}</div>` : ''}</div></div>`;
+}
+
+function homeView() {
+  const c = counts(), up = upcoming(), next = up[0];
+  const hour = new Date().getHours();
+  const greet = hour < 13 ? 'Buen día' : hour < 20 ? 'Buenas tardes' : 'Buenas noches';
+  return `<div class="px-4 pt-2 pb-4 space-y-3 fade-in">
+    <div>
+      <div class="text-xl font-semibold">${greet}${userName ? ', ' + esc(userName) : ''}</div>
+      <div class="text-sm text-slate-500">¿Qué querés hacer hoy?</div>
+    </div>
+    <button data-go="report" class="w-full flex items-center gap-3 rounded-xl bg-red-600 hover:bg-red-700 active:scale-[.99] transition text-white p-4 text-left">
+      <span class="w-11 h-11 rounded-lg bg-white/15 flex items-center justify-center">${icon('megaphone', 'w-6 h-6')}</span>
+      <span class="flex-1"><span class="block font-semibold text-[17px]">Quiero reportar un basural</span><span class="block text-sm text-red-100">Marcás el lugar y sacás una foto</span></span>${icon('chevron', 'w-5 h-5')}
+    </button>
+    <button data-go="join" class="w-full flex items-center gap-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-[.99] transition text-white p-4 text-left">
+      <span class="w-11 h-11 rounded-lg bg-white/15 flex items-center justify-center">${icon('users', 'w-6 h-6')}</span>
+      <span class="flex-1"><span class="block font-semibold text-[17px]">Quiero sumarme a una limpieza</span><span class="block text-sm text-emerald-100">${up.length ? `${up.length} ${up.length === 1 ? 'jornada próxima' : 'jornadas próximas'}` : 'Ver dónde hace falta ayuda'}</span></span>${icon('chevron', 'w-5 h-5')}
+    </button>
+    <button data-go="list" class="w-full flex items-center gap-3 rounded-xl ring-1 ring-slate-200 hover:bg-slate-50 p-4 text-left">
+      <span class="w-11 h-11 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center">${icon('list', 'w-6 h-6')}</span>
+      <span class="flex-1"><span class="block font-semibold">Ver todos los puntos</span>
+        <span class="flex gap-3 text-xs mt-0.5"><span class="text-red-700">${c.red} reportados</span><span class="text-amber-700">${c.yellow} programados</span><span class="text-green-700">${c.green} limpios</span></span></span>${icon('chevron', 'w-5 h-5 text-slate-400')}
+    </button>
+    <button data-act="summary" class="w-full flex items-center gap-3 rounded-xl ring-1 ring-slate-200 hover:bg-slate-50 p-4 text-left">
+      <span class="w-11 h-11 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center">${icon('chart', 'w-6 h-6')}</span>
+      <span class="flex-1"><span class="block font-semibold">Resumen y estadísticas</span><span class="block text-xs text-slate-500">Cuánto se limpió, en cuánto tiempo y qué falta</span></span>${icon('chevron', 'w-5 h-5 text-slate-400')}
+    </button>
+    ${next ? `<div class="rounded-xl bg-amber-50 ring-1 ring-amber-200 p-3">
+      <div class="text-xs font-medium text-amber-800 uppercase tracking-wide">Próxima limpieza · ${untilText(next.scheduledAt)}</div>
+      <div class="font-semibold mt-1">${esc(next.address)}</div>
+      <div class="text-sm text-slate-600">${fmtShort(next.scheduledAt)} · ${next.volunteers} anotados</div>
+      <div class="flex gap-2 mt-2">
+        <button data-join="${next.id}" class="flex-1 rounded-lg py-2 text-sm font-medium ${state.joined.includes(next.id) ? 'bg-white ring-1 ring-emerald-300 text-emerald-800' : 'bg-emerald-700 text-white'}">${state.joined.includes(next.id) ? 'Ya estás anotado' : 'Me sumo'}</button>
+        <button data-id="${next.id}" class="rounded-lg py-2 px-4 text-sm font-medium bg-white ring-1 ring-slate-200">Ver</button>
+      </div></div>` : ''}
+    ${feedHTML()}
+  </div>`;
+}
+// Novedades del barrio: últimas acciones de los vecinos en todos los puntos
+function feedHTML() {
+  const items = state.reports.flatMap(r => (r.history || []).map(h => ({ ...h, r }))).sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 4);
+  if (!items.length) return '';
+  return `<div class="pt-1">
+    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Novedades del barrio</div>
+    <div class="divide-y divide-slate-100">${items.map(i => `<button data-id="${i.r.id}" class="w-full text-left flex gap-3 py-2.5">
+      <span class="w-2 h-2 mt-1.5 shrink-0 rounded-full ${STATUS[i.r.status].dot}"></span>
+      <span class="min-w-0"><span class="block text-sm"><b class="font-medium">${esc(i.by)}</b> ${esc(i.text.charAt(0).toLowerCase() + i.text.slice(1))}</span>
+      <span class="block text-xs text-slate-400 truncate">${esc(i.r.address)} · ${relTime(i.at)}</span></span></button>`).join('')}</div></div>`;
+}
+
+function cardHTML(r) {
+  const st = STATUS[r.status];
+  const extra = r.status === 'yellow' ? `<div class="text-xs text-amber-700 mt-1 flex items-center gap-1">${icon('calendar')} ${fmtShort(r.scheduledAt)}</div>`
+    : r.status === 'green' ? `<div class="text-xs text-green-700 mt-1 flex items-center gap-1">${icon('check')} Limpiado ${relTime(r.cleanedAt || r.scheduledAt)}</div>` : '';
+  return `<button data-id="${r.id}" class="w-full text-left flex gap-3 px-4 py-3 hover:bg-slate-50 transition">
+    <img src="${photoOf(r)}" class="w-16 h-16 rounded-lg object-cover shrink-0 bg-slate-200" alt="">
+    <div class="min-w-0 flex-1">
+      <div class="flex items-center gap-1.5 text-xs font-medium ${st.text}"><span class="w-2 h-2 rounded-full ${st.dot}"></span>${st.label}${r.demo ? '<span class="ml-auto text-[10px] font-normal text-slate-400 bg-slate-100 rounded px-1.5">Ejemplo</span>' : ''}</div>
+      <div class="font-medium text-sm mt-0.5 truncate">${esc(r.address || 'Sin referencia')}</div>
+      <div class="text-xs text-slate-500 truncate">${esc(r.type)} · ${esc(r.size)} · ${r.volunteers} ${r.volunteers === 1 ? 'anotado' : 'anotados'}</div>
+      ${extra}
+    </div></button>`;
+}
+
+function listView() {
+  const order = { red: 0, yellow: 1, green: 2 };
+  const items = state.reports.filter(r => filter === 'all' || r.status === filter).sort((a, b) => order[a.status] - order[b.status] || new Date(b.reportedAt) - new Date(a.reportedAt));
+  const fb = (f, l) => `<button data-f="${f}" class="shrink-0 text-sm rounded-full px-3 py-1.5 ${filter === f ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}">${l}</button>`;
+  return header('Todos los puntos', `${state.reports.length} en San Roque`) +
+    `<div class="flex gap-1.5 px-4 py-2.5 overflow-x-auto">${fb('all', 'Todos')}${fb('red', 'Reportados')}${fb('yellow', 'Programados')}${fb('green', 'Limpios')}</div>
+     <div class="divide-y divide-slate-100 fade-in">${items.length ? items.map(cardHTML).join('') : '<div class="text-center text-slate-400 py-10 text-sm">No hay puntos en este estado.</div>'}</div>`;
+}
+
+function joinView() {
+  const up = upcoming();
+  const need = state.reports.filter(r => r.status === 'red').sort((a, b) => a.volunteers - b.volunteers);
+  const joinBtn = (r) => { const j = state.joined.includes(r.id);
+    return `<button data-join="${r.id}" class="shrink-0 rounded-lg px-3 py-2 text-sm font-medium ${j ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-300' : 'bg-emerald-700 text-white'}">${j ? icon('check') + ' Anotado' : 'Me sumo'}</button>`; };
+  const row = (r, sub) => `<div class="flex items-center gap-3 px-4 py-3">
+      <button data-id="${r.id}" class="flex-1 min-w-0 text-left">
+        <div class="font-medium text-sm truncate">${esc(r.address || 'Sin referencia')}</div>
+        <div class="text-xs text-slate-500">${sub}</div></button>${joinBtn(r)}</div>`;
+  return header('Sumarme a una limpieza', 'Elegí un lugar y anotate') + `<div class="fade-in">
+    <div class="px-4 pt-3 pb-1 text-xs font-semibold text-amber-800 uppercase tracking-wide">Jornadas con fecha</div>
+    ${up.length ? `<div class="divide-y divide-slate-100">${up.map(r => row(r, `<span class="text-amber-700">${untilText(r.scheduledAt)} · ${fmtShort(r.scheduledAt)}</span> · ${r.volunteers} anotados`)).join('')}</div>`
+      : '<div class="px-4 py-3 text-sm text-slate-500">No hay jornadas programadas por ahora.</div>'}
+    <div class="px-4 pt-4 pb-1 text-xs font-semibold text-red-700 uppercase tracking-wide">Necesitan voluntarios para organizarse</div>
+    ${need.length ? `<div class="divide-y divide-slate-100">${need.map(r => row(r, `${esc(r.type)} · ${esc(r.size)} · ${r.volunteers} anotados`)).join('')}</div>`
+      : '<div class="px-4 py-3 text-sm text-slate-500">No hay puntos sin organizar.</div>'}
+    <p class="px-4 py-4 text-xs text-slate-400">Cuando un punto junta varios vecinos, cualquiera puede proponer fecha desde su ficha.</p></div>`;
+}
+
+function stepper(n) {
+  return `<div class="flex gap-1.5 px-4 pt-1 pb-3">${[1, 2, 3].map(i => `<div class="h-1 flex-1 rounded-full ${i <= n ? 'bg-red-600' : 'bg-slate-200'}"></div>`).join('')}</div>`;
+}
+function reportView() {
+  const top = `<div class="flex items-center justify-between px-4 pt-2 pb-2">
+      <button data-back class="p-2 -ml-2 rounded-lg hover:bg-slate-100">${icon('back', 'w-5 h-5')}</button>
+      <div class="text-sm font-medium text-slate-500">Paso ${{ loc: 1, what: 2, photo: 3 }[step]} de 3</div>
+      <button data-go="home" class="text-sm text-slate-500 px-2 py-1">Cancelar</button></div>${stepper({ loc: 1, what: 2, photo: 3 }[step])}`;
+  if (step === 'loc') return top + `<div class="px-4 pb-4 space-y-3 fade-in">
+      <div><div class="text-lg font-semibold">¿Dónde está el basural?</div>
+      <div class="text-sm text-slate-500">Mové el mapa hasta que el pin rojo quede justo encima. Podés buscar la calle arriba.</div></div>
+      <div class="flex items-center gap-2 rounded-lg bg-slate-50 ring-1 ring-slate-200 px-3 py-2.5 text-sm">${icon('pin', 'w-4 h-4 text-red-600')}<span id="locText"></span></div>
+      <div id="zoomHint" class="hidden text-xs text-amber-700 flex items-center gap-1">${icon('alert')} Acercá más el mapa para ubicarlo bien en la cuadra.</div>
+      <div class="grid grid-cols-2 gap-2">
+        <button data-act="gps" class="rounded-lg ring-1 ring-slate-300 py-3 text-sm font-medium flex items-center justify-center gap-1.5">${icon('locate')} Estoy acá</button>
+        <button data-act="confirmLoc" class="rounded-lg bg-red-600 hover:bg-red-700 text-white py-3 text-sm font-semibold">Confirmar lugar</button>
+      </div></div>`;
+  if (step === 'what') {
+    const opt = (k, v, title, sub) => `<button data-${k}="${v}" class="text-left rounded-lg ring-1 px-3 py-2.5 transition ${draft[k] === v ? 'ring-2 ring-red-600 bg-red-50' : 'ring-slate-300'}"><div class="font-medium text-sm">${title}</div><div class="text-xs text-slate-500 leading-tight">${sub}</div></button>`;
+    return top + `<div class="px-4 pb-4 space-y-4 fade-in">
+      <div><div class="text-lg font-semibold">¿Qué hay tirado?</div></div>
+      <div class="grid grid-cols-2 gap-2">${TYPES.map(t => opt('type', t, t, TYPE_HINT[t])).join('')}</div>
+      <div><div class="text-sm font-medium mb-1.5">¿Qué tan grande es?</div>
+      <div class="grid grid-cols-3 gap-2">${Object.entries(SIZES).map(([s, d]) => opt('size', s, s, d)).join('')}</div></div>
+      <button data-act="toPhoto" ${draft.type && draft.size ? '' : 'disabled'} class="w-full rounded-lg bg-red-600 text-white py-3 font-semibold disabled:opacity-40">Siguiente</button></div>`;
+  }
+  if (step === 'photo') return top + `<div class="px-4 pb-4 space-y-3 fade-in">
+      <div class="text-lg font-semibold">Foto y detalle</div>
+      ${draft.photo ? `<div class="relative"><img src="${draft.photo}" class="w-full h-40 object-cover rounded-lg"><button data-act="rmPhoto" class="absolute top-2 right-2 p-1.5 rounded-md bg-white/90 shadow">${icon('x')}</button></div>` : ''}
+      <label class="flex items-center justify-center gap-2 rounded-lg ring-1 ring-slate-300 py-3 text-sm font-medium cursor-pointer hover:bg-slate-50">
+        ${icon('camera', 'w-5 h-5')} ${draft.photo ? 'Cambiar foto' : 'Sacar foto'}
+        <input type="file" accept="image/*" capture="environment" id="photoFile" class="hidden" /></label>
+      <label class="block text-sm font-medium">Referencia
+        <input id="addr" value="${esc(draft.address || draft.street || '')}" class="mt-1 w-full rounded-lg ring-1 ring-slate-300 px-3 py-2.5 text-sm font-normal focus:ring-2 focus:ring-red-600 focus:outline-none border-0" placeholder="Ej.: Belgrano y San Martín, al lado del canal"></label>
+      <label class="block text-sm font-medium">Comentario <span class="font-normal text-slate-400">(opcional)</span>
+        <textarea id="desc" rows="2" class="mt-1 w-full rounded-lg ring-1 ring-slate-300 px-3 py-2.5 text-sm font-normal focus:ring-2 focus:ring-red-600 focus:outline-none border-0" placeholder="Hace cuánto está, si hay cubiertas o agua estancada...">${esc(draft.desc || '')}</textarea></label>
+      <button data-act="submit" class="w-full rounded-lg bg-red-600 hover:bg-red-700 text-white py-3 font-semibold">Enviar reporte</button></div>`;
+}
+
+function doneView() {
+  const r = state.reports.find(x => x.id === lastCreatedId);
+  return `<div class="px-6 py-6 text-center space-y-3 fade-in">
+    <div class="w-14 h-14 mx-auto rounded-full bg-green-100 text-green-700 flex items-center justify-center">${icon('check', 'w-8 h-8')}</div>
+    <div class="text-xl font-semibold">Gracias${userName ? ', ' + esc(userName) : ''}</div>
+    <p class="text-sm text-slate-600">Tu reporte ya está en el mapa${r?.address ? ` (${esc(r.address)})` : ''}. Te anotamos como primer voluntario. Compartilo para que se sumen más vecinos.</p>
+    <div class="grid grid-cols-2 gap-2 pt-2">
+      <button data-act="shareNew" class="rounded-lg ring-1 ring-slate-300 py-3 text-sm font-medium flex items-center justify-center gap-1.5">${icon('share')} Compartir</button>
+      <button data-id="${lastCreatedId}" class="rounded-lg ring-1 ring-slate-300 py-3 text-sm font-medium">Ver reporte</button>
+    </div>
+    <button data-go="home" class="w-full rounded-lg bg-slate-900 text-white py-3 font-medium">Volver al inicio</button></div>`;
+}
+
+function renderPanel() {
+  const body = $('#panelBody');
+  body.innerHTML = view === 'home' ? homeView() : view === 'list' ? listView() : view === 'join' ? joinView() : view === 'report' ? reportView() : doneView();
+  body.scrollTop = 0;
+  $('#centerPin').classList.toggle('hidden', !(view === 'report' && step === 'loc'));
+  if (view === 'report' && step === 'loc') updateLocText();
+  const pf = $('#photoFile'); if (pf) pf.onchange = onPhoto;
+}
+function go(v) {
+  if (view === 'report' && v !== 'report') { draft = null; step = null; if (draftMarker) { map.removeLayer(draftMarker); draftMarker = null; } }
+  view = v;
+  if (v === 'report') startReport(); else renderPanel();
+}
+
+// ================= Flujo de reporte =================
+function startReport() {
+  draft = { lat: null, lng: null, type: null, size: null, photo: null, street: null, streetLoading: true };
+  step = 'loc'; selectedId = null; renderMarkers();
+  if (map.getZoom() < 17) map.setZoom(17); else map.fire('moveend');
+  renderPanel();
+  toast('Mové el mapa hasta que el pin quede sobre el basural');
+}
+function saveStepFields() { if ($('#addr')) draft.address = $('#addr').value; if ($('#desc')) draft.desc = $('#desc').value; }
+function onPhoto(e) {
+  const f = e.target.files[0]; if (!f) return;
+  saveStepFields();
+  const rd = new FileReader();
+  rd.onload = () => { const img = new Image(); img.onload = () => {
+    const cv = document.createElement('canvas'), s = Math.min(1, 600 / Math.max(img.width, img.height));
+    cv.width = img.width * s; cv.height = img.height * s; cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+    draft.photo = cv.toDataURL('image/jpeg', 0.7); renderPanel();
+  }; img.src = rd.result; };
+  rd.readAsDataURL(f);
+}
+function shareText(r) {
+  return `Hay un basural en ${r.address || 'San Roque'} (${r.type.toLowerCase()}, tamaño ${r.size.toLowerCase()}).` +
+    (r.status === 'yellow' ? ` Lo limpiamos el ${fmtDateTime(r.scheduledAt)}. ${r.meetNote || ''}` : '') + ' ¿Te sumás? Mapa Limpio San Roque.';
+}
+function toggleJoin(r) {
+  const i = state.joined.indexOf(r.id);
+  if (i >= 0) { state.joined.splice(i, 1); r.volunteers = Math.max(0, r.volunteers - 1); toast('Te quitamos de la lista'); }
+  else { state.joined.push(r.id); r.volunteers++; log(r, 'Se sumó a la limpieza'); toast(r.status === 'yellow' ? `Anotado para el ${fmtShort(r.scheduledAt)}` : 'Anotado. Te avisamos cuando haya fecha.'); }
+  save();
+}
+
+// Clics dentro del panel
+$('#panelBody').addEventListener('click', async (e) => {
+  const t = e.target.closest('button'); if (!t) return;
+  if (t.dataset.go) return go(t.dataset.go);
+  if (t.dataset.id) return openDetail(+t.dataset.id);
+  if (t.dataset.f) { filter = t.dataset.f; return renderPanel(); }
+  if (t.dataset.join) { const r = state.reports.find(x => x.id === +t.dataset.join); toggleJoin(r); renderMarkers(); return renderPanel(); }
+  if (t.dataset.type) { draft.type = t.dataset.type; return renderPanel(); }
+  if (t.dataset.size) { draft.size = t.dataset.size; return renderPanel(); }
+  if (t.hasAttribute('data-back')) {
+    saveStepFields();
+    if (step === 'loc') return go('home');
+    if (step === 'what') { step = 'loc'; if (draftMarker) { map.removeLayer(draftMarker); draftMarker = null; } map.setView([draft.lat, draft.lng]); return renderPanel(); }
+    step = 'what'; return renderPanel();
+  }
+  const act = t.dataset.act;
+  if (act === 'gps') { const ll = await locateMe(true); if (!ll) return; }
+  else if (act === 'confirmLoc') {
+    if (draft.lat == null) { const c = map.getCenter(); draft.lat = c.lat; draft.lng = c.lng; }
+    if (map.getZoom() < 16) { flyToPoint(map.getCenter(), 17); return toast('Acercá un poco más el mapa para marcar bien la cuadra'); }
+    const near = state.reports.find(r => r.status !== 'green' && map.distance([r.lat, r.lng], [draft.lat, draft.lng]) < 50);
+    if (near && confirm(`Ya hay un reporte a menos de 50 m (${near.address}). ¿Es el mismo basural?\n\nAceptar: ver ese reporte\nCancelar: seguir con uno nuevo`)) { go('home'); return openDetail(near.id); }
+    placeDraftMarker(); step = 'what'; renderPanel();
+  }
+  else if (act === 'summary') openSummary();
+  else if (act === 'toPhoto') { step = 'photo'; renderPanel(); }
+  else if (act === 'rmPhoto') { saveStepFields(); draft.photo = null; renderPanel(); }
+  else if (act === 'submit') submitReport();
+  else if (act === 'shareNew') { const r = state.reports.find(x => x.id === lastCreatedId); if (r) window.open('https://wa.me/?text=' + encodeURIComponent(shareText(r)), '_blank'); }
+});
+
+let draftMarker = null;
+function placeDraftMarker() {
+  if (draftMarker) map.removeLayer(draftMarker);
+  draftMarker = L.marker([draft.lat, draft.lng], { icon: L.divIcon({ className: '', iconSize: [22, 22], iconAnchor: [11, 11], html: '<div class="pin pin-red"></div>' }), interactive: false }).addTo(map);
+}
+function submitReport() {
+  saveStepFields();
+  const r = {
+    id: Math.max(0, ...state.reports.map(x => x.id)) + 1, lat: draft.lat, lng: draft.lng, status: 'red', type: draft.type, size: draft.size,
+    address: (draft.address || '').trim() || draft.street || 'Sin referencia', desc: (draft.desc || '').trim(),
+    reportedAt: new Date().toISOString(), volunteers: 1, photo: draft.photo, scheduledAt: null, reporter: me(),
+    photos: [], history: [],
+  };
+  log(r, draft.photo ? 'Reportó el basural con foto' : 'Reportó el basural');
+  state.reports.push(r); state.joined.push(r.id); save();
+  if (draftMarker) { map.removeLayer(draftMarker); draftMarker = null; }
+  lastCreatedId = r.id; draft = null; step = null; view = 'done';
+  renderMarkers(); renderPanel(); flyToPoint([r.lat, r.lng], 17);
+}
+
+// ================= Ficha del punto =================
+function openDetail(id) {
+  const r = state.reports.find(x => x.id === id); if (!r) return;
+  selectedId = id; flyToPoint([r.lat, r.lng], Math.max(map.getZoom(), 17));
+  renderMarkers(); renderDetail(r, 'main'); openModal('detailModal');
+}
+function renderDetail(r, mode) {
+  const st = STATUS[r.status], joined = state.joined.includes(r.id);
+  let actions;
+  if (mode === 'schedule') {
+    const def = r.scheduledAt ? new Date(r.scheduledAt) : (() => { const d = new Date(); d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7 || 7)); return d; })();
+    actions = `<div class="rounded-lg ring-1 ring-slate-200 p-4 space-y-3">
+      <div class="font-medium">¿Cuándo limpiamos?</div>
+      <div class="grid grid-cols-2 gap-2">
+        <label class="text-sm text-slate-600">Día<input id="schDate" type="date" value="${def.toLocaleDateString('en-CA')}" min="${new Date().toLocaleDateString('en-CA')}" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-slate-900"></label>
+        <label class="text-sm text-slate-600">Hora<input id="schTime" type="time" value="${r.scheduledAt ? def.toTimeString().slice(0, 5) : '09:00'}" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-slate-900"></label>
+      </div>
+      <label class="text-sm text-slate-600 block">Punto de encuentro y qué llevar<input id="schNote" value="${esc(r.meetNote || 'Traer guantes y bolsas.')}" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-slate-900"></label>
+      <div class="grid grid-cols-2 gap-2 pt-1">
+        <button data-act="back" class="rounded-lg ring-1 ring-slate-300 py-2.5 text-sm font-medium">Cancelar</button>
+        <button data-act="confirmSchedule" class="rounded-lg bg-slate-900 text-white py-2.5 text-sm font-medium">Confirmar</button></div></div>`;
+  } else if (mode === 'clean') {
+    actions = `<div class="rounded-lg ring-1 ring-green-300 bg-green-50/60 p-4 space-y-3">
+      <div class="font-semibold text-green-900">Mostrá cómo quedó</div>
+      <div class="text-sm text-slate-600">Sacá una foto del lugar limpio. Así los vecinos y el municipio ven que ya está hecho.</div>
+      ${cleanDraft.photo ? `<img src="${cleanDraft.photo}" class="w-full h-40 object-cover rounded-lg">` : ''}
+      <label class="flex items-center justify-center gap-2 rounded-lg bg-white ring-1 ring-slate-300 py-3 text-sm font-medium cursor-pointer">
+        ${icon('camera', 'w-5 h-5')} ${cleanDraft.photo ? 'Cambiar foto' : 'Sacar foto del después'}
+        <input type="file" accept="image/*" capture="environment" id="afterFile" class="hidden"></label>
+      <textarea id="cleanNote" rows="2" class="w-full rounded-lg ring-1 ring-slate-300 border-0 px-3 py-2 text-sm" placeholder="Ej.: Fuimos 8, sacamos 30 bolsas. El camión pasó a las 11.">${esc(cleanDraft.note)}</textarea>
+      <div class="grid grid-cols-2 gap-2">
+        <button data-act="back" class="rounded-lg ring-1 ring-slate-300 bg-white py-2.5 text-sm font-medium">Cancelar</button>
+        <button data-act="confirmClean" ${cleanDraft.photo ? '' : 'disabled'} class="rounded-lg bg-green-700 text-white py-2.5 text-sm font-semibold disabled:opacity-40">Confirmar limpieza</button></div>
+      <button data-act="cleanNoPhoto" class="block w-full text-center text-xs text-slate-500 underline">No tengo foto</button></div>`;
+  } else if (r.status === 'green') {
+    actions = `<div class="rounded-lg bg-green-50 ring-1 ring-green-200 px-4 py-3 text-sm text-green-800">
+      <div class="font-semibold">Ya está hecho</div>
+      Se limpió ${relTime(r.cleanedAt || r.scheduledAt)} con ${r.volunteers} vecinos${r.cleanedBy ? `. Lo confirmó ${esc(r.cleanedBy)}` : ''}${r.afterPhoto ? ' con foto' : ''}.
+      ${r.cleanNote ? `<div class="mt-1 text-green-900">"${esc(r.cleanNote)}"</div>` : ''}
+      <button data-act="reopen" class="block mt-2 text-xs text-slate-500 underline">Volvieron a tirar basura: reabrir</button></div>`;
+  } else {
+    actions = `<button data-act="join" class="w-full inline-flex items-center justify-center gap-2 rounded-lg py-3 font-semibold ${joined ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-300' : 'bg-emerald-700 hover:bg-emerald-800 text-white'}">
+        ${icon(joined ? 'check' : 'users')} ${joined ? 'Estás anotado · No puedo ir' : 'Me sumo a la limpieza'}</button>
+      <div class="grid grid-cols-2 gap-2">
+        <button data-act="schedule" class="inline-flex items-center justify-center gap-1.5 rounded-lg ring-1 ring-slate-300 py-2.5 text-sm font-medium">${icon('calendar')} ${r.status === 'yellow' ? 'Cambiar fecha' : 'Poner fecha'}</button>
+        <button data-act="clean" class="inline-flex items-center justify-center gap-1.5 rounded-lg ring-1 ring-slate-300 py-2.5 text-sm font-medium">${icon('check')} Ya está limpio</button></div>
+      <button data-act="share" class="w-full inline-flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm text-slate-600 hover:bg-slate-50">${icon('share')} Compartir por WhatsApp</button>`;
+  }
+  const hasWater = /cubierta|agua|neumátic/i.test(r.desc || '');
+  const before = r.photo || placeholder(r.type);
+  const hero = r.status === 'green'
+    ? `<div class="grid grid-cols-2 gap-0.5">
+        <button data-img="${esc(before)}" data-cap="Antes" class="relative"><img src="${before}" class="w-full h-44 object-cover rounded-tl-2xl sm:rounded-tl-xl bg-slate-200"><span class="absolute bottom-2 left-2 text-xs font-semibold bg-black/60 text-white px-2 py-0.5 rounded">Antes</span></button>
+        <button data-img="${esc(photoOf(r))}" data-cap="Después" class="relative"><img src="${photoOf(r)}" class="w-full h-44 object-cover rounded-tr-2xl sm:rounded-tr-xl bg-slate-200"><span class="absolute bottom-2 left-2 text-xs font-semibold bg-green-700 text-white px-2 py-0.5 rounded">Después</span></button></div>`
+    : `<button data-img="${esc(photoOf(r))}" data-cap="Foto del reporte" class="block w-full"><img src="${photoOf(r)}" class="w-full h-44 object-cover rounded-t-2xl sm:rounded-t-xl bg-slate-200" alt=""></button>`;
+  const photos = r.photos || [];
+  const gallery = mode === 'main' ? `<div>
+      <div class="flex justify-between items-center mb-2">
+        <div class="text-sm font-semibold">Fotos de los vecinos <span class="font-normal text-slate-400">(${photos.length})</span></div>
+        <label class="text-sm text-emerald-700 font-medium cursor-pointer inline-flex items-center gap-1">${icon('camera')} Subir foto
+          <input type="file" accept="image/*" capture="environment" id="addPhotoFile" class="hidden"></label></div>
+      ${photos.length ? `<div class="flex gap-2 overflow-x-auto pb-1">${photos.map(p => `<button data-img="${esc(p.src)}" data-cap="${esc(p.by)} · ${relTime(p.at)}" class="shrink-0 relative">
+          <img src="${p.src}" class="w-24 h-24 rounded-lg object-cover"><span class="absolute bottom-1 left-1 right-1 text-[10px] bg-black/60 text-white px-1 rounded truncate">${esc(p.by)} · ${relTime(p.at)}</span></button>`).join('')}</div>`
+        : `<div class="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2.5">Si pasás por ahí, sacá una foto para mostrar cómo está hoy. Ayuda a saber si empeoró o si ya lo limpiaron.</div>`}
+    </div>` : '';
+  const hist = (r.history || []).slice().reverse().slice(0, 8);
+  const activity = mode === 'main' && hist.length ? `<div>
+      <div class="text-sm font-semibold mb-2">Actividad</div>
+      <ol class="space-y-2.5 border-l-2 border-slate-100 pl-3">${hist.map(h => `<li class="text-sm"><div class="text-slate-800">${esc(h.text)}</div><div class="text-xs text-slate-400">${esc(h.by)} · ${relTime(h.at)}</div></li>`).join('')}</ol></div>` : '';
+  $('#detailContent').innerHTML = `
+    <div class="relative">${hero}
+      <button data-act="close" class="absolute top-3 right-3 p-1.5 rounded-md bg-white/90 shadow">${icon('x', 'w-5 h-5')}</button></div>
+    <div class="p-5 space-y-4">
+      <div><span class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded ring-1 ${st.badge}"><span class="w-1.5 h-1.5 rounded-full ${st.dot}"></span>${st.label}</span>
+        <h2 class="text-lg font-semibold mt-2">${esc(r.address || 'Sin referencia')}</h2>
+        <p class="text-sm text-slate-500">${esc(r.type)} · ${esc(r.size)} (${SIZES[r.size].toLowerCase()})${r.demo ? ' · <span class="text-slate-400">punto de ejemplo</span>' : ''}</p></div>
+      ${r.desc ? `<p class="text-sm text-slate-700">${esc(r.desc)}</p>` : ''}
+      ${hasWater && r.status !== 'green' ? `<div class="flex gap-2 text-xs text-amber-800 bg-amber-50 ring-1 ring-amber-200 rounded-lg px-3 py-2">${icon('alert', 'w-4 h-4')} Hay recipientes que pueden juntar agua. Conviene retirarlos primero (prevención del dengue).</div>` : ''}
+      <dl class="grid grid-cols-3 text-sm border-y border-slate-100 py-3">
+        <div><dt class="text-xs text-slate-500">Anotados</dt><dd class="font-semibold">${r.volunteers}</dd></div>
+        <div><dt class="text-xs text-slate-500">Reportado</dt><dd class="font-semibold">${fmtDate(r.reportedAt)}</dd></div>
+        <div><dt class="text-xs text-slate-500">Reportó</dt><dd class="font-semibold truncate">${esc(r.reporter || 'Vecino')}</dd></div></dl>
+      ${r.status === 'yellow' && mode !== 'schedule' ? `<div class="rounded-lg bg-amber-50 ring-1 ring-amber-200 px-3 py-2.5 text-sm">
+          <div class="flex items-center gap-1.5 font-semibold text-amber-900">${icon('calendar')} ${fmtDateTime(r.scheduledAt)}</div>
+          ${r.meetNote ? `<div class="text-amber-800 mt-0.5">${esc(r.meetNote)}</div>` : ''}</div>` : ''}
+      <div class="space-y-2">${actions}</div>
+      ${gallery}
+      ${activity}
+    </div>`;
+  $('#detailContent').querySelectorAll('[data-act]').forEach(b => b.onclick = () => detailAction(r, b.dataset.act));
+  $('#detailContent').querySelectorAll('[data-img]').forEach(b => b.onclick = () => showImage(b.dataset.img, b.dataset.cap));
+  const af = $('#afterFile');
+  if (af) af.onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    cleanDraft.note = $('#cleanNote').value;
+    cleanDraft.photo = await readImage(f); renderDetail(r, 'clean');
+  };
+  const ap = $('#addPhotoFile');
+  if (ap) ap.onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    (r.photos ||= []).push({ src: await readImage(f), by: me(), at: new Date().toISOString() });
+    log(r, 'Subió una foto de cómo está el lugar');
+    save(); renderPanel(); renderDetail(r, 'main'); toast('Foto agregada. Gracias por avisar.');
+  };
+}
+function finishClean(r, photo) {
+  Object.assign(r, { status: 'green', cleanedAt: new Date().toISOString(), afterPhoto: photo, cleanNote: ($('#cleanNote')?.value || '').trim(), cleanedBy: me() });
+  state.joined = state.joined.filter(x => x !== r.id);
+  log(r, photo ? 'Marcó el lugar como limpio y subió la foto del después' : 'Marcó el lugar como limpio (sin foto)');
+  cleanDraft = null;
+  toast('Listo, quedó como limpio. Gracias.');
+}
+function detailAction(r, act) {
+  if (act === 'close') return closeModal('detailModal');
+  if (act === 'join') toggleJoin(r);
+  else if (act === 'schedule') return renderDetail(r, 'schedule');
+  else if (act === 'back') return renderDetail(r, 'main');
+  else if (act === 'confirmSchedule') {
+    const d = $('#schDate').value, t = $('#schTime').value; if (!d || !t) return toast('Elegí día y hora');
+    r.scheduledAt = new Date(`${d}T${t}`).toISOString(); r.meetNote = $('#schNote').value.trim(); r.status = 'yellow';
+    if (!state.joined.includes(r.id)) { state.joined.push(r.id); r.volunteers++; }
+    log(r, `Programó la limpieza para el ${fmtShort(r.scheduledAt)}`);
+    toast('Limpieza programada');
+  } else if (act === 'clean') { cleanDraft = { photo: null, note: '' }; return renderDetail(r, 'clean'); }
+  else if (act === 'confirmClean') finishClean(r, cleanDraft.photo);
+  else if (act === 'cleanNoPhoto') {
+    if (!confirm('Sin foto, los demás vecinos no pueden ver cómo quedó. ¿Confirmar igual?')) return;
+    finishClean(r, null);
+  } else if (act === 'reopen') {
+    Object.assign(r, { status: 'red', scheduledAt: null, cleanedAt: null, meetNote: null, afterPhoto: null, cleanNote: null, cleanedBy: null, reportedAt: new Date().toISOString(), volunteers: 0 });
+    log(r, 'Reabrió el reporte: volvieron a tirar basura');
+    toast('Reporte reabierto');
+  } else if (act === 'share') return window.open('https://wa.me/?text=' + encodeURIComponent(shareText(r)), '_blank');
+  save(); renderMarkers(); renderPanel(); renderDetail(r, 'main');
+}
+
+// ================= Info, bienvenida y eventos =================
+function showTab(tab) {
+  document.querySelectorAll('.info-tab').forEach(b => { const on = b.dataset.tab === tab;
+    b.classList.toggle('border-emerald-700', on); b.classList.toggle('text-slate-900', on); b.classList.toggle('border-transparent', !on); b.classList.toggle('text-slate-500', !on); });
+  document.querySelectorAll('.info-panel').forEach(p => p.classList.toggle('hidden', p.dataset.panel !== tab));
+  if (tab === 'datos') renderDataTab();
+}
+document.querySelectorAll('.info-tab').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+const openInfo = () => { showTab('problema'); openModal('infoModal'); };
+$('#infoBtn').onclick = openInfo; $('#welcomeInfo').onclick = openInfo;
+$('#infoModal [data-close]').onclick = () => closeModal('infoModal');
+['detailModal', 'infoModal'].forEach(id => $('#' + id).addEventListener('click', (e) => { if (e.target.id === id) closeModal(id); }));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal('detailModal'); closeModal('infoModal'); closeModal('summaryModal'); } });
+
+$('#enterBtn').onclick = () => {
+  userName = $('#nameInput').value.trim();
+  localStorage.setItem('mapaLimpio.nombre', userName); localStorage.setItem('mapaLimpio.entro', '1');
+  $('#welcome').classList.add('hidden'); renderPanel(); map.invalidateSize();
+};
+$('#nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#enterBtn').click(); });
+$('#resetBtn').onclick = () => {
+  const real = state.reports.filter(r => !r.demo).length;
+  if (!confirm(`¿Volver a los datos de ejemplo? Se borran todos los cambios${real ? ` y los ${real} puntos cargados (guardá un respaldo antes)` : ''}.`)) return;
+  state = demoState(); save();
+  localStorage.removeItem('mapaLimpio.entro'); localStorage.removeItem('mapaLimpio.nombre');
+  location.reload();
+};
+
+// ================= Datos: exportar, respaldo y relevamiento =================
+function updateDemoNote() {
+  const n = state.reports.filter(r => r.demo).length;
+  $('#demoNote').textContent = n ? 'Versión de prueba. Algunos puntos del mapa son ejemplos.' : 'Versión de prueba.';
+  if (n && n === state.reports.length) $('#demoNote').textContent = 'Versión de prueba. Los puntos del mapa son ejemplos.';
+}
+function renderDataTab() {
+  const demo = state.reports.filter(r => r.demo).length, real = state.reports.length - demo;
+  const photos = state.reports.reduce((n, r) => n + (r.photo ? 1 : 0) + (r.afterPhoto ? 1 : 0) + (r.photos || []).length, 0);
+  let kb = 0; try { kb = Math.round((localStorage.getItem(STORE_KEY) || '').length / 1024); } catch {}
+  $('#dataSummary').innerHTML = `<div class="font-medium text-slate-900">${state.reports.length} puntos en el mapa</div>
+    <div class="text-slate-600">${real} cargados · ${demo} de ejemplo · ${photos} fotos</div>
+    <div class="text-xs text-slate-400 mt-1">Espacio usado: ${kb >= 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB'} (los navegadores permiten alrededor de 5 MB)</div>`;
+  $('#demoRemoveBox').classList.toggle('hidden', !demo);
+}
+function download(name, text, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name;
+  document.body.append(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+const stamp = () => new Date().toLocaleDateString('en-CA');
+const fmtCsvDate = (iso) => iso ? new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+function exportCSV() {
+  const cols = ['ID', 'Estado', 'Tipo', 'Tamaño', 'Referencia', 'Comentario', 'Latitud', 'Longitud', 'Reportado', 'Reportó', 'Anotados', 'Limpieza programada', 'Punto de encuentro', 'Limpiado', 'Fotos', 'Ejemplo', 'Ver en mapa'];
+  const rows = state.reports.map(r => [r.id, STATUS[r.status].label, r.type, r.size, r.address, r.desc, r.lat.toFixed(6), r.lng.toFixed(6),
+    fmtCsvDate(r.reportedAt), r.reporter, r.volunteers, fmtCsvDate(r.status === 'yellow' ? r.scheduledAt : null), r.status === 'yellow' ? r.meetNote : '',
+    fmtCsvDate(r.cleanedAt), (r.photo ? 1 : 0) + (r.afterPhoto ? 1 : 0) + (r.photos || []).length, r.demo ? 'Sí' : 'No',
+    `https://www.openstreetmap.org/?mlat=${r.lat.toFixed(6)}&mlon=${r.lng.toFixed(6)}#map=18/${r.lat.toFixed(6)}/${r.lng.toFixed(6)}`]);
+  // Punto y coma + BOM: así Excel en español lo abre en columnas y con acentos
+  const cell = (v) => `"${String(v ?? '').replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
+  download(`mapa-limpio-${stamp()}.csv`, '﻿' + [cols, ...rows].map(r => r.map(cell).join(';')).join('\r\n'), 'text/csv;charset=utf-8');
+}
+function exportGeoJSON() {
+  const fc = { type: 'FeatureCollection', features: state.reports.map(r => ({ type: 'Feature',
+    geometry: { type: 'Point', coordinates: [+r.lng.toFixed(6), +r.lat.toFixed(6)] },
+    properties: { id: r.id, estado: STATUS[r.status].label, tipo: r.type, tamano: r.size, referencia: r.address, comentario: r.desc || '',
+      reportado: r.reportedAt, anotados: r.volunteers, programado: r.status === 'yellow' ? r.scheduledAt : null, limpiado: r.cleanedAt || null, ejemplo: !!r.demo } })) };
+  download(`mapa-limpio-${stamp()}.geojson`, JSON.stringify(fc, null, 1), 'application/geo+json');
+}
+function exportBackup() {
+  download(`mapa-limpio-respaldo-${stamp()}.json`, JSON.stringify({ app: 'mapa-limpio', version: 1, exportedAt: new Date().toISOString(), reports: state.reports.filter(r => !r.demo) }), 'application/json');
+  toast('Respaldo guardado (sin los puntos de ejemplo)');
+}
+// Todo lo que viene de un archivo se revisa: tipos válidos, fechas reales y fotos que sean imágenes de verdad
+const IMG_RE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
+const okImg = (s) => typeof s === 'string' && IMG_RE.test(s) ? s : null;
+const okDate = (s) => s && !isNaN(new Date(s)) ? new Date(s).toISOString() : null;
+const okStr = (s, max = 500) => typeof s === 'string' ? s.slice(0, max) : '';
+function cleanImported(r) {
+  const lat = +r.lat, lng = +r.lng;
+  if (!isFinite(lat) || !isFinite(lng) || !STATUS[r.status] || !TYPES.includes(r.type) || !SIZES[r.size] || !okDate(r.reportedAt)) return null;
+  const out = { lat, lng, status: r.status, type: r.type, size: r.size, address: okStr(r.address, 120) || 'Sin referencia', desc: okStr(r.desc),
+    reportedAt: okDate(r.reportedAt), reporter: okStr(r.reporter, 40) || 'Vecino/a', volunteers: Math.max(0, parseInt(r.volunteers) || 0),
+    photo: okImg(r.photo), afterPhoto: okImg(r.afterPhoto), scheduledAt: okDate(r.scheduledAt), cleanedAt: okDate(r.cleanedAt),
+    meetNote: okStr(r.meetNote, 200), cleanNote: okStr(r.cleanNote), cleanedBy: okStr(r.cleanedBy, 40) || null,
+    photos: (Array.isArray(r.photos) ? r.photos : []).map(p => ({ src: okImg(p?.src), by: okStr(p?.by, 40), at: okDate(p?.at) })).filter(p => p.src && p.at),
+    history: (Array.isArray(r.history) ? r.history : []).map(h => ({ at: okDate(h?.at), by: okStr(h?.by, 40), text: okStr(h?.text, 200) })).filter(h => h.at && h.text) };
+  if (out.status === 'yellow' && !out.scheduledAt) out.status = 'red';
+  return out;
+}
+async function importBackup(file) {
+  let data;
+  try { data = JSON.parse(await file.text()); } catch { return toast('Ese archivo no es un respaldo de Mapa Limpio'); }
+  if (data?.app !== 'mapa-limpio' || !Array.isArray(data.reports)) return toast('Ese archivo no es un respaldo de Mapa Limpio');
+  const key = (r) => `${(+r.lat).toFixed(6)},${(+r.lng).toFixed(6)},${new Date(r.reportedAt).getTime()}`;
+  const have = new Set(state.reports.map(key));
+  let id = Math.max(0, ...state.reports.map(x => x.id)), added = 0, skipped = 0, bad = 0;
+  const before = state.reports.length;
+  for (const raw of data.reports) {
+    if (raw?.demo) continue;
+    const r = cleanImported(raw || {});
+    if (!r) { bad++; continue; }
+    if (have.has(key(r))) { skipped++; continue; }
+    r.id = ++id; state.reports.push(r); have.add(key(r)); added++;
+  }
+  if (added && !save()) { state.reports.length = before; return; }
+  renderMarkers(); renderPanel(); renderDataTab(); updateDemoNote();
+  toast(`${added} puntos sumados${skipped ? ` · ${skipped} ya estaban` : ''}${bad ? ` · ${bad} con errores` : ''}`);
+}
+$('#infoModal').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-export]'); if (!b) return;
+  ({ csv: exportCSV, geojson: exportGeoJSON, backup: exportBackup })[b.dataset.export]();
+});
+$('#importFile').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) importBackup(f); };
+$('#removeDemoBtn').onclick = () => {
+  const n = state.reports.filter(r => r.demo).length;
+  if (!confirm(`¿Quitar los ${n} puntos de ejemplo? Quedan solo los cargados por vecinos.`)) return;
+  state.reports = state.reports.filter(r => !r.demo);
+  state.joined = state.joined.filter(id => state.reports.some(r => r.id === id));
+  save(); renderMarkers(); renderPanel(); renderDataTab(); updateDemoNote();
+  toast('Listo, el mapa tiene solo puntos reales');
+};
+
+// ================= Resumen y estadísticas =================
+// Volumen aproximado por tamaño (m³). Es una estimación para dar una idea, no una medición.
+const VOLUME = { Chico: 0.3, Mediano: 2, Grande: 8 };
+const waterRisk = (r) => /cubierta|neum[aá]tic|agua|balde|bidón|botella|cacharro/i.test(r.desc || '');
+let sumIncludeDemo = null;
+function openSummary() { renderSummary(); openModal('summaryModal'); $('#summaryModal').scrollTop = 0; }
+const fmtNum = (n, d = 0) => n.toLocaleString('es-AR', { maximumFractionDigits: d, minimumFractionDigits: 0 });
+function fmtDays(d) { if (d < 1) return 'menos de 1 día'; const n = Math.round(d); return `${n} ${n === 1 ? 'día' : 'días'}`; }
+
+function renderSummary() {
+  const DAY = 86400000, now = Date.now();
+  const demoN = state.reports.filter(r => r.demo).length, realN = state.reports.length - demoN;
+  const incl = sumIncludeDemo ?? realN === 0;
+  const R = state.reports.filter(r => incl || !r.demo);
+  const pct = (a, b) => b ? Math.round(a * 100 / b) : 0;
+  const red = R.filter(r => r.status === 'red'), yellow = R.filter(r => r.status === 'yellow'), green = R.filter(r => r.status === 'green');
+  const pending = [...red, ...yellow];
+  const times = green.filter(r => r.cleanedAt).map(r => Math.max(0, (new Date(r.cleanedAt) - new Date(r.reportedAt)) / DAY));
+  const avgDays = times.length ? times.reduce((a, b) => a + b, 0) / times.length : null;
+  const volunteers = R.reduce((n, r) => n + (r.volunteers || 0), 0);
+  const m3Done = green.reduce((n, r) => n + VOLUME[r.size], 0), m3Pending = pending.reduce((n, r) => n + VOLUME[r.size], 0);
+  const today0 = new Date().setHours(0, 0, 0, 0);
+  const upcomingN = yellow.filter(r => new Date(r.scheduledAt) >= today0).length;
+  const overdueN = yellow.filter(r => new Date(r.scheduledAt) < today0).length;
+  const dengue = pending.filter(waterRisk).length;
+  const reopened = R.filter(r => (r.history || []).some(h => /^Reabrió/.test(h.text))).length;
+  const withPhoto = R.filter(r => r.photo).length, afterPhoto = green.filter(r => r.afterPhoto).length;
+
+  const card = (label, value, sub, tone = 'text-slate-900') => `<div class="bg-white rounded-xl ring-1 ring-slate-200 p-4 avoid-break">
+      <div class="text-xs text-slate-500">${label}</div><div class="text-2xl sm:text-3xl font-bold mt-1 ${tone}">${value}</div>${sub ? `<div class="text-xs text-slate-500 mt-0.5">${sub}</div>` : ''}</div>`;
+  const box = (title, body, extra = '') => `<div class="bg-white rounded-xl ring-1 ring-slate-200 p-4 sm:p-5 avoid-break ${extra}"><div class="font-semibold text-slate-900 mb-3">${title}</div>${body}</div>`;
+  const hbar = (label, n, total, color, note = '') => `<div class="mb-2.5"><div class="flex justify-between text-sm"><span>${label}</span><span class="text-slate-500">${n}${note}</span></div>
+      <div class="h-2.5 rounded-full bg-slate-100 mt-1 overflow-hidden"><div class="h-full rounded-full ${color}" style="width:${total ? Math.max(n ? 3 : 0, n * 100 / total) : 0}%"></div></div></div>`;
+
+  // Últimas 8 semanas (de lunes a domingo)
+  const mon = new Date(today0); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
+  const weeks = Array.from({ length: 8 }, (_, i) => { const s = mon.getTime() - (7 - i) * 7 * DAY; return { s, e: s + 7 * DAY, rep: 0, cln: 0 }; });
+  R.forEach(r => {
+    const t = new Date(r.reportedAt).getTime(), c = r.cleanedAt && new Date(r.cleanedAt).getTime();
+    weeks.forEach(w => { if (t >= w.s && t < w.e) w.rep++; if (c && c >= w.s && c < w.e) w.cln++; });
+  });
+  const wMax = Math.max(1, ...weeks.map(w => Math.max(w.rep, w.cln)));
+  const bar = (n, color) => `<div class="w-3 sm:w-4 rounded-t ${color}" style="height:${n ? Math.max(4, n * 100 / wMax) : 0}%" title="${n}"></div>`;
+  const weekChart = `<div class="flex items-end gap-1 sm:gap-3 h-36 border-b border-slate-200">${weeks.map(w => `<div class="flex-1 h-full flex items-end justify-center gap-0.5">${bar(w.rep, 'bg-red-500')}${bar(w.cln, 'bg-green-600')}</div>`).join('')}</div>
+    <div class="flex gap-1 sm:gap-3 mt-1">${weeks.map((w, i) => `<div class="flex-1 text-center text-[10px] text-slate-400">${i === 7 ? 'Esta sem.' : new Date(w.s).toLocaleDateString('es-AR', { day: 'numeric', month: 'numeric' })}</div>`).join('')}</div>
+    <div class="flex gap-4 text-xs text-slate-500 mt-3"><span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-red-500"></span>Reportados</span><span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-green-600"></span>Limpiados</span></div>`;
+
+  const byType = TYPES.map(t => { const all = R.filter(r => r.type === t); return { t, n: all.length, done: all.filter(r => r.status === 'green').length }; }).sort((a, b) => b.n - a.n);
+  const bySize = Object.keys(SIZES).map(s => ({ s, n: R.filter(r => r.size === s).length }));
+  const oldest = pending.slice().sort((a, b) => new Date(a.reportedAt) - new Date(b.reportedAt)).slice(0, 6);
+
+  const dateStr = new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' });
+  const summaryText = R.length
+    ? `En San Roque se registraron <b>${R.length} basurales</b>. <b>${green.length} ya se limpiaron</b> (${pct(green.length, R.length)}%)${volunteers ? `, con <b>${volunteers} vecinos</b> anotados para ayudar` : ''}${avgDays != null ? `, y cada punto tardó en promedio <b>${fmtDays(avgDays)}</b> desde que se reportó hasta quedar limpio` : ''}. Se retiraron unos <b>${fmtNum(m3Done, 1)} m³</b> de residuos. Quedan <b>${pending.length} pendientes</b>${upcomingN ? `, ${upcomingN} de ellos con limpieza programada` : ''}.`
+    : 'Todavía no hay puntos cargados.';
+
+  $('#summaryContent').innerHTML = `
+    <div class="flex items-start justify-between gap-3 mb-4">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-xl bg-emerald-700 text-white flex items-center justify-center shrink-0">${icon('leaf', 'w-6 h-6')}</div>
+        <div><div class="text-xl sm:text-2xl font-bold">Mapa Limpio · Resumen</div>
+        <div class="text-sm text-slate-500">San Roque, Corrientes · Datos al ${dateStr}</div></div>
+      </div>
+      <div class="flex gap-2 no-print shrink-0">
+        <button id="sumPrint" class="hidden sm:inline-flex items-center gap-1.5 rounded-lg bg-white ring-1 ring-slate-300 px-3 py-2 text-sm font-medium">${icon('print')} Imprimir / PDF</button>
+        <button id="sumClose" class="rounded-lg bg-white ring-1 ring-slate-300 p-2" title="Cerrar">${icon('x', 'w-5 h-5')}</button>
+      </div>
+    </div>
+    ${demoN && realN ? `<label class="no-print flex items-center gap-2 text-sm text-slate-600 mb-3"><input type="checkbox" id="sumDemo" ${incl ? 'checked' : ''} class="w-4 h-4"> Incluir los ${demoN} puntos de ejemplo</label>` : ''}
+    ${incl && demoN ? `<div class="rounded-lg bg-amber-50 ring-1 ring-amber-200 text-amber-900 text-sm px-4 py-2.5 mb-4">${realN ? 'Estos números incluyen puntos de ejemplo.' : 'Estos números son de los puntos de ejemplo. Cuando se carguen reportes reales, el resumen se arma solo con ellos.'}</div>` : ''}
+
+    <div class="bg-emerald-800 text-white rounded-xl p-4 sm:p-5 mb-4 avoid-break">
+      <div class="text-xs uppercase tracking-wide text-emerald-200 mb-1">En pocas palabras</div>
+      <p class="text-[15px] sm:text-base leading-relaxed">${summaryText}</p>
+    </div>
+
+    ${R.length ? `
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+      ${card('Basurales registrados', R.length, `${withPhoto} con foto`)}
+      ${card('Espacios recuperados', green.length, `${pct(green.length, R.length)}% del total${afterPhoto ? ` · ${afterPhoto} con foto del después` : ''}`, 'text-green-700')}
+      ${card('Tiempo promedio hasta limpiar', avgDays != null ? fmtDays(avgDays) : '—', avgDays != null ? 'desde el reporte' : 'todavía no hay limpiezas')}
+      ${card('Vecinos anotados', volunteers, 'suma de voluntarios en todos los puntos', 'text-emerald-700')}
+      ${card('Residuos retirados', `${fmtNum(m3Done, 1)} m³`, 'estimado según el tamaño')}
+      ${card('Pendientes', pending.length, `${red.length} sin fecha · ${upcomingN} programados${overdueN ? ` · ${overdueN} con fecha vencida` : ''}`, 'text-red-700')}
+      ${card('Por retirar', `${fmtNum(m3Pending, 1)} m³`, 'estimado en puntos pendientes')}
+      ${card('Riesgo de dengue', dengue, 'pendientes con recipientes que juntan agua', dengue ? 'text-amber-700' : 'text-slate-900')}
+    </div>
+
+    <div class="grid lg:grid-cols-2 gap-3 mb-3">
+      ${box('Estado de los puntos', `
+        <div class="flex h-4 rounded-full overflow-hidden bg-slate-100 mb-3">
+          <div class="bg-red-600" style="width:${pct(red.length, R.length)}%"></div><div class="bg-amber-500" style="width:${pct(yellow.length, R.length)}%"></div><div class="bg-green-600" style="width:${100 - pct(red.length, R.length) - pct(yellow.length, R.length)}%"></div></div>
+        <div class="grid grid-cols-3 text-center text-sm">
+          <div><div class="text-xl font-bold text-red-700">${red.length}</div><div class="text-xs text-slate-500">Reportados</div></div>
+          <div><div class="text-xl font-bold text-amber-700">${yellow.length}</div><div class="text-xs text-slate-500">Programados</div></div>
+          <div><div class="text-xl font-bold text-green-700">${green.length}</div><div class="text-xs text-slate-500">Limpios</div></div></div>
+        ${reopened ? `<div class="text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100">${reopened} ${reopened === 1 ? 'lugar se volvió' : 'lugares se volvieron'} a ensuciar después de limpiarse.</div>` : ''}`)}
+      ${box('Actividad de las últimas 8 semanas', weekChart)}
+    </div>
+
+    <div class="grid lg:grid-cols-2 gap-3 mb-3">
+      ${box('Qué tipo de residuo hay', byType.map(x => hbar(x.t, x.n, R.length, 'bg-emerald-600', x.n ? ` · ${x.done} limpios` : '')).join('') + '<div class="text-xs text-slate-400 mt-2">Ayuda a planificar: poda y escombros necesitan camión; los domiciliarios suelen indicar falta de recolección.</div>')}
+      ${box('Tamaño de los basurales', bySize.map(x => hbar(`${x.s} <span class="text-slate-400 text-xs">(${SIZES[x.s].toLowerCase()})</span>`, x.n, R.length, 'bg-slate-500')).join(''))}
+    </div>
+
+    ${oldest.length ? box('Pendientes que llevan más tiempo', `<div class="overflow-x-auto"><table class="w-full text-sm">
+        <thead><tr class="text-left text-xs text-slate-500 border-b border-slate-200"><th class="py-2 pr-3 font-medium">Lugar</th><th class="py-2 pr-3 font-medium">Tipo</th><th class="py-2 pr-3 font-medium">Estado</th><th class="py-2 font-medium text-right">Esperando</th></tr></thead>
+        <tbody>${oldest.map(r => `<tr data-sid="${r.id}" class="border-b border-slate-100 last:border-0 cursor-pointer hover:bg-slate-50">
+          <td class="py-2 pr-3">${esc(r.address)}${waterRisk(r) ? ` <span class="text-amber-600" title="Recipientes con agua">${icon('alert')}</span>` : ''}</td>
+          <td class="py-2 pr-3 text-slate-600">${esc(r.type)} · ${esc(r.size)}</td>
+          <td class="py-2 pr-3"><span class="inline-flex items-center gap-1.5 text-xs ${STATUS[r.status].text}"><span class="w-2 h-2 rounded-full ${STATUS[r.status].dot}"></span>${STATUS[r.status].label}</span></td>
+          <td class="py-2 text-right font-medium whitespace-nowrap">${fmtDays((now - new Date(r.reportedAt)) / DAY)}</td></tr>`).join('')}</tbody></table></div>`, 'mb-3') : ''}
+    ` : ''}
+
+    <div class="text-xs text-slate-400 leading-relaxed mt-4 mb-8">
+      Datos cargados por vecinos en Mapa Limpio. Los volúmenes son estimaciones (chico ≈ ${VOLUME.Chico} m³, mediano ≈ ${VOLUME.Mediano} m³, grande ≈ ${VOLUME.Grande} m³).
+      "Vecinos anotados" suma los voluntarios de cada punto: una misma persona puede estar anotada en varios. Versión de prueba.
+    </div>`;
+
+  $('#sumClose').onclick = () => closeModal('summaryModal');
+  $('#sumPrint').onclick = () => window.print();
+  const dc = $('#sumDemo'); if (dc) dc.onchange = () => { sumIncludeDemo = dc.checked; renderSummary(); };
+  $('#summaryContent').querySelectorAll('[data-sid]').forEach(tr => tr.onclick = () => { closeModal('summaryModal'); openDetail(+tr.dataset.sid); });
+}
+$('#summaryBtn').onclick = openSummary;
+
+refreshDemoDates();
+updateDemoNote();
+hydrateIcons();
+renderMarkers();
+renderPanel();
+if (!localStorage.getItem('mapaLimpio.entro')) $('#welcome').classList.remove('hidden');
+setTimeout(() => map.invalidateSize(), 200);
+window.addEventListener('resize', () => map.invalidateSize());
+</script>
+</body>
+</html>
