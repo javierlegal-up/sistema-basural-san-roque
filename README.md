@@ -21,7 +21,7 @@ Un mapa hecho entre vecinos y municipio para saber dónde hay basura acumulada (
 
 ## Modo Municipalidad (demo)
 
-Tocá el ícono del edificio, arriba al lado del buscador, y entrá como encargado. Ahí hay tres pantallas:
+En el celular: pestaña **Más** → "Soy de la Municipalidad". En la computadora: ícono del edificio, arriba al lado del buscador. Después entrá como encargado. Ahí hay tres pantallas:
 
 - **Bandeja:** los reclamos de los vecinos, ordenados por prioridad (dengue, tamaño, días de espera y cantidad de vecinos).
 - **Recorrido de hoy:** la ruta en orden, con km, tiempo y m³ estimados. Se puede ver en el mapa o abrir en Google Maps.
